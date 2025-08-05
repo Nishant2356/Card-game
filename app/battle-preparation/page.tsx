@@ -1,5 +1,4 @@
 "use client";
-
 import { Button } from "@/components/ui/button";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
@@ -16,8 +15,8 @@ export default function BattlePreparation() {
     setOpenModal(true);
   };
 
-  const handleConfirmSelection = (player: string, characters: any) => {
-    // Replace existing player selection if they reselect
+  // Save selected characters (with moves) for a player
+  const handleConfirmSelection = (player: string, characters: any[]) => {
     setTeams((prev) => {
       const filtered = prev.filter((t) => t.player !== player);
       return [...filtered, { player, characters }];
@@ -26,45 +25,29 @@ export default function BattlePreparation() {
   };
 
   const goToBattle = () => {
-    router.push("/battle");
+    localStorage.setItem("battleTeams", JSON.stringify(teams));
+    console.log(teams)
+    router.push("/battle-page");
   };
 
   return (
     <div className="flex flex-col items-center justify-between h-screen bg-gradient-to-br from-indigo-900 to-purple-900 p-10">
-      {/* Player 1 Selection */}
-      <Button
-        className="w-60 py-6 text-xl rounded-2xl shadow-lg"
-        onClick={() => handleOpenModal("Player 1")}
-      >
-        {teams.find((t) => t.player === "Player 1")
-          ? "Re-select Player 1"
-          : "Select Player 1"}
+      <Button className="w-60 py-6 text-xl rounded-2xl shadow-lg" onClick={() => handleOpenModal("Player 1")}>
+        {teams.find((t) => t.player === "Player 1") ? "Re-select Player 1" : "Select Player 1"}
       </Button>
 
-      {/* VS in the middle */}
       <h1 className="text-6xl font-extrabold text-white">VS</h1>
 
-      {/* Player 2 Selection */}
-      <Button
-        className="w-60 py-6 text-xl rounded-2xl shadow-lg"
-        onClick={() => handleOpenModal("Player 2")}
-      >
-        {teams.find((t) => t.player === "Player 2")
-          ? "Re-select Player 2"
-          : "Select Player 2"}
+      <Button className="w-60 py-6 text-xl rounded-2xl shadow-lg" onClick={() => handleOpenModal("Player 2")}>
+        {teams.find((t) => t.player === "Player 2") ? "Re-select Player 2" : "Select Player 2"}
       </Button>
 
-      {/* Show battle button only when both players selected */}
       {teams.length === 2 && (
-        <Button
-          className="mt-6 w-60 py-4 text-xl rounded-2xl shadow-lg bg-green-600 hover:bg-green-500"
-          onClick={goToBattle}
-        >
+        <Button className="mt-6 w-60 py-4 text-xl rounded-2xl shadow-lg bg-green-600 hover:bg-green-500" onClick={goToBattle}>
           Start Battle
         </Button>
       )}
 
-      {/* Modal for character selection */}
       <CharacterSelectionModal
         open={openModal}
         onClose={() => setOpenModal(false)}

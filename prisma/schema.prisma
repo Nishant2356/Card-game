@@ -29,5 +29,39 @@ model Character {
   updatedAt   DateTime @updatedAt
 }
 
+model Move {
+  id                 String    @id @default(cuid())
+  name               String
+
+  // Classification
+  categories         String[]  // e.g., ["target", "domain", "protection", "exception"]
+  roles              String[]  // e.g., ["damage", "support"]
+  effects            String[]  // e.g., ["buff", "debuff"]
+  affectedStats      String[]  // e.g., ["hp", "attack", "defense", "speed"]
+
+  // Battle mechanics
+  power              Int       // 0–100
+  accuracy           Int       // 0–100
+  targetTypes        String[]  // e.g., ["single", "double", "all", "self"]
+  duration           Int       // Duration in turns
+  moveType           String    // "physical" | "special"
+  contact            Boolean   // true = contact move
+
+  // Special case handling
+  exceptionHandler   String?   // (Optional) Store function name or serialized logic
+
+  // Multimedia
+  moveSound          String?   // Path or file reference
+  animation          String?   // Animation reference
+
+  // Metadata
+  relatedCharacters  String[]  // Array of character IDs
+  description        String?   // Tooltip/lore text
+
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+}
+
+
 
 

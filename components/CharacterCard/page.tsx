@@ -1,14 +1,11 @@
 "use client";
 import { useState } from "react";
 import { AiOutlineCheckCircle, AiFillCheckCircle, AiOutlineInfoCircle } from "react-icons/ai";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import MoveSelectionModal from "@/app/modals/MoveSelectionModal";
 
 type Move = { name: string; type: string; power?: number; description?: string };
 type Ability = { name: string; description: string };
-
 type Character = {
   id: number;
   name: string;
@@ -25,10 +22,12 @@ export default function CharacterCard({
   character,
   selected,
   onSelect,
+  onSelectionChange,
 }: {
   character: Character;
   selected: boolean;
   onSelect: (id: number) => void;
+  onSelectionChange: (id: number, data: { name: string; moves: Move[] }) => void;
 }) {
   const [flipped, setFlipped] = useState(false);
   const [selectedMoves, setSelectedMoves] = useState<Move[]>(character.movePool.slice(0, 4));
@@ -42,20 +41,31 @@ export default function CharacterCard({
     glowColor: "rgba(0, 150, 255, 0.7)",
   };
 
-  // Open modal for replacing a move
   const handleMoveClick = (index: number) => {
     setMoveIndexToEdit(index);
     setMoveModalOpen(true);
   };
 
-  // Replace selected move
   const handleMoveSelect = (newMove: Move) => {
     if (moveIndexToEdit !== null) {
       const updated = [...selectedMoves];
       updated[moveIndexToEdit] = newMove;
       setSelectedMoves(updated);
+      if (selected) {
+        onSelectionChange(character.id, { name: character.name, moves: updated });
+      }
     }
     setMoveModalOpen(false);
+  };
+
+  const handleSelectClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onSelect(character.id);
+    if (!selected) {
+      onSelectionChange(character.id, { name: character.name, moves: selectedMoves });
+    } else {
+      onSelectionChange(character.id, { name: character.name, moves: [] });
+    }
   };
 
   return (
@@ -73,17 +83,11 @@ export default function CharacterCard({
           }}
         >
           {/* Selection Icon */}
-          <div
-            className="absolute top-3 left-3 z-30 cursor-pointer"
-            onClick={(e) => {
-              e.stopPropagation();
-              onSelect(character.id);
-            }}
-          >
+          <div className="absolute top-3 left-3 z-30 cursor-pointer" onClick={handleSelectClick}>
             {selected ? (
-              <AiFillCheckCircle size={36} className="text-green-400 drop-shadow-lg transition-transform transform scale-110" />
+              <AiFillCheckCircle size={36} className="text-green-400 drop-shadow-lg transform scale-110" />
             ) : (
-              <AiOutlineCheckCircle size={36} className="text-white drop-shadow-lg hover:text-green-300 transition" />
+              <AiOutlineCheckCircle size={36} className="text-white drop-shadow-lg hover:text-green-300" />
             )}
           </div>
 
@@ -120,32 +124,6 @@ export default function CharacterCard({
               >
                 {character.name} - {character.title}
               </h2>
-
-              {/* Abilities Section (Compact) */}
-              {character.abilities && (
-                <div style={{ marginTop: "6px", marginBottom: "8px" }}>
-                  <div style={{ display: "flex", alignItems: "center", fontSize: "14px", color: "#fff", marginBottom: "4px" }}>
-                    <strong>Special:</strong>&nbsp; {character.abilities.special?.name || "Unknown"}
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <AiOutlineInfoCircle className="ml-1 cursor-pointer" />
-                      </TooltipTrigger>
-                      <TooltipContent>{character.abilities.special?.description || "No description available"}</TooltipContent>
-                    </Tooltip>
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", fontSize: "14px", color: "#fff" }}>
-                    <strong>Hidden:</strong>&nbsp; {character.abilities.hidden?.name || "Unknown"}
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <AiOutlineInfoCircle className="ml-1 cursor-pointer" />
-                      </TooltipTrigger>
-                      <TooltipContent>{character.abilities.hidden?.description || "No description available"}</TooltipContent>
-                    </Tooltip>
-                  </div>
-                </div>
-              )}
-
-
 
               {/* Move List */}
               <ul style={{ padding: 0, listStyle: "none", marginTop: "6px" }}>
@@ -184,57 +162,8 @@ export default function CharacterCard({
               </ul>
             </div>
           </div>
-
-          {/* BACK SIDE */}
-          <div
-            className="card-side"
-            style={{
-              transform: "rotateY(180deg)",
-              position: "absolute",
-              width: "100%",
-              height: "100%",
-              backfaceVisibility: "hidden",
-              borderRadius: "20px",
-              border: `3px solid ${theme.borderColor}`,
-              background: `linear-gradient(145deg, ${theme.primaryColor}, ${theme.secondaryColor})`,
-            }}
-            onClick={() => setFlipped(!flipped)}
-          >
-            <div style={{ width: "100%", height: "220px", borderBottom: `3px solid ${theme.borderColor}`, overflow: "hidden" }}>
-              <img src={character.image} alt={character.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-            </div>
-            <div style={{ padding: "20px", color: "#fff" }}>
-              <h2 style={{ textAlign: "center", fontSize: "18px", marginBottom: "10px" }}>Stats</h2>
-              {Object.entries(character.stats).map(([key, value]) => (
-                <div key={key} style={{ margin: "8px 0", display: "flex", justifyContent: "space-between" }}>
-                  <span style={{ fontWeight: "bold" }}>{key.toUpperCase()}</span>
-                  <div
-                    style={{
-                      flex: 1,
-                      margin: "0 8px",
-                      background: "rgba(255,255,255,0.2)",
-                      height: "12px",
-                      borderRadius: "10px",
-                      border: `1px solid ${theme.borderColor}`,
-                      overflow: "hidden",
-                    }}
-                  >
-                    <div
-                      style={{
-                        width: `${value}%`,
-                        height: "100%",
-                        background: `linear-gradient(90deg, ${theme.primaryColor}, ${theme.secondaryColor})`,
-                      }}
-                    ></div>
-                  </div>
-                  <span>{value}</span>
-                </div>
-              ))}
-            </div>
-          </div>
         </div>
 
-        {/* Move selection modal */}
         <MoveSelectionModal
           open={moveModalOpen}
           onClose={() => setMoveModalOpen(false)}
@@ -242,21 +171,9 @@ export default function CharacterCard({
           onSelect={handleMoveSelect}
         />
 
-        {/* Green highlight border when selected */}
         {selected && (
-          <div
-            className="absolute inset-0 rounded-2xl pointer-events-none"
-            style={{
-              border: "4px solid lime",
-              boxShadow: "0 0 20px lime",
-            }}
-          ></div>
+          <div className="absolute inset-0 rounded-2xl pointer-events-none" style={{ border: "4px solid lime", boxShadow: "0 0 20px lime" }}></div>
         )}
-
-        <style>{`
-          .card { position: relative; }
-          .flipped { transform: rotateY(180deg); }
-        `}</style>
       </div>
     </TooltipProvider>
   );

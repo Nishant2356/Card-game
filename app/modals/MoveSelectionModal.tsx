@@ -18,6 +18,11 @@ export default function MoveSelectionModal({
   movePool: Move[];
   onSelect: (move: Move) => void;
 }) {
+  const handleSelect = (move: Move) => {
+    onSelect(move); // Pass selected move back to CharacterCard
+    onClose(); // Close modal immediately after selection
+  };
+
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-md">
@@ -50,7 +55,7 @@ export default function MoveSelectionModal({
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
-                <Button size="sm" onClick={() => onSelect(move)}>
+                <Button size="sm" onClick={() => handleSelect(move)}>
                   Select
                 </Button>
               </div>
