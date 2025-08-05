@@ -110,7 +110,7 @@ export default function CharacterCard({
             onClick={() => setFlipped(!flipped)}
           >
             <div style={{ width: "100%", height: "220px", borderBottom: `3px solid ${theme.borderColor}`, overflow: "hidden" }}>
-              <img src={character.image} alt={character.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              <img src={character.image} alt={character.name} style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "top" }} />
             </div>
             <div style={{ padding: "10px", textAlign: "left" }}>
               <h2
@@ -124,6 +124,49 @@ export default function CharacterCard({
               >
                 {character.name} - {character.title}
               </h2>
+
+              {/* Abilities Section (added) */}
+              {character.abilities && (
+                <div style={{ marginTop: "6px", marginBottom: "8px" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      fontSize: "13px",
+                      color: "#fff",
+                      marginBottom: "5px",
+                    }}
+                  >
+                    <strong>Special:</strong>&nbsp;{character.abilities.special?.name || "Unknown"}
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <AiOutlineInfoCircle className="ml-1 cursor-pointer" />
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        {character.abilities.special?.description || "No description available"}
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      fontSize: "13px",
+                      color: "#fff",
+                    }}
+                  >
+                    <strong>Hidden:</strong>&nbsp;{character.abilities.hidden?.name || "Unknown"}
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <AiOutlineInfoCircle className="ml-1 cursor-pointer" />
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        {character.abilities.hidden?.description || "No description available"}
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
+                </div>
+              )}
 
               {/* Move List */}
               <ul style={{ padding: 0, listStyle: "none", marginTop: "6px" }}>
@@ -162,6 +205,75 @@ export default function CharacterCard({
               </ul>
             </div>
           </div>
+
+          {/* BACK SIDE with image (added like BattleCard) */}
+          <div
+            className="card-side"
+            style={{
+              transform: "rotateY(180deg)",
+              position: "absolute",
+              width: "100%",
+              height: "100%",
+              backfaceVisibility: "hidden",
+              borderRadius: "20px",
+              border: `3px solid ${theme.borderColor}`,
+              background: `linear-gradient(145deg, ${theme.primaryColor}, ${theme.secondaryColor})`,
+              color: "#fff",
+              display: "flex",
+              flexDirection: "column",
+            }}
+            onClick={() => setFlipped(!flipped)}
+          >
+            <div
+              style={{
+                width: "100%",
+                height: "220px",
+                borderBottom: `3px solid ${theme.borderColor}`,
+                overflow: "hidden",
+              }}
+            >
+              <img
+                src={character.image}
+                alt={character.name}
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  objectFit: "cover",
+                  objectPosition: "top",
+                }}
+              />
+            </div>
+            <div style={{ padding: "16px", flex: 1 }}>
+              <h2 style={{ textAlign: "center", fontSize: "18px", marginBottom: "10px" }}>
+                Stats
+              </h2>
+              {Object.entries(character.stats).map(([key, value]) => (
+                <div key={key} style={{ margin: "8px 0", display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ fontWeight: "bold", fontSize: "14px" }}>{key.toUpperCase()}</span>
+                  <div
+                    style={{
+                      flex: 1,
+                      margin: "0 8px",
+                      background: "rgba(255,255,255,0.2)",
+                      height: "10px",
+                      borderRadius: "6px",
+                      border: `1px solid ${theme.borderColor}`,
+                      overflow: "hidden",
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: `${value}%`,
+                        height: "100%",
+                        background: `linear-gradient(90deg, ${theme.primaryColor}, ${theme.secondaryColor})`,
+                      }}
+                    ></div>
+                  </div>
+                  <span style={{ fontSize: "14px" }}>{value}</span>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
 
         <MoveSelectionModal
@@ -174,6 +286,11 @@ export default function CharacterCard({
         {selected && (
           <div className="absolute inset-0 rounded-2xl pointer-events-none" style={{ border: "4px solid lime", boxShadow: "0 0 20px lime" }}></div>
         )}
+
+        <style>{`
+          .card { position: relative; }
+          .flipped { transform: rotateY(180deg); }
+        `}</style>
       </div>
     </TooltipProvider>
   );

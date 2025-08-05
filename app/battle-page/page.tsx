@@ -1,8 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import BattleCard from "@/components/BattleCard/page";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
+import DeckModal from "../modals/DeckModal";
 
 export default function BattlePage() {
   const [player1DeckOpen, setPlayer1DeckOpen] = useState(false);
@@ -10,7 +9,7 @@ export default function BattlePage() {
   const [player1Deck, setPlayer1Deck] = useState<any[]>([]);
   const [player2Deck, setPlayer2Deck] = useState<any[]>([]);
 
-  // Load teams and fetch only needed characters
+  // Load teams and fetch characters
   useEffect(() => {
     const storedTeams = localStorage.getItem("battleTeams");
     if (!storedTeams) return;
@@ -27,15 +26,9 @@ export default function BattlePage() {
           team.characters.map((char: any) => {
             const fullChar = data.find((c: any) => c.name === char.name);
             return {
-              character: {
-                ...fullChar,
-                selectedMoves: char.moves, // Use the selected moves
-              },
+              character: { ...fullChar, selectedMoves: char.moves },
               currentHP: fullChar?.stats?.hp || 100,
               maxHP: fullChar?.stats?.hp || 100,
-              props: {
-                onClick: () => console.log(`${team.player} clicked on ${char.name}`),
-              },
             };
           });
 
@@ -44,6 +37,12 @@ export default function BattlePage() {
       })
       .catch((err) => console.error("Error fetching characters:", err));
   }, []);
+
+  // Separate active (on-field) and benched cards
+  const player1Active = player1Deck.slice(0, 2);
+  const player1Benched = player1Deck.slice(2);
+  const player2Active = player2Deck.slice(0, 2);
+  const player2Benched = player2Deck.slice(2);
 
   return (
     <div className="h-screen bg-gradient-to-b from-gray-900 to-black flex flex-col items-center justify-center p-4">
@@ -59,15 +58,13 @@ export default function BattlePage() {
 
         {/* Player 2 Active Cards */}
         <div className="col-span-2 flex justify-center space-x-4">
-          {player2Deck.slice(0, 2).map((card, idx) => (
+          {player2Active.map((card, idx) => (
             <BattleCard
               key={idx}
-              big
               character={card.character}
-              selectedMoves={card.character.selectedMoves} // 🔹 Pass selected moves
               currentHP={card.currentHP}
               maxHP={card.maxHP}
-              {...card.props}
+              selectedMoves={card.character.selectedMoves}
             />
           ))}
         </div>
@@ -79,15 +76,13 @@ export default function BattlePage() {
 
         {/* Player 1 Active Cards */}
         <div className="col-span-2 flex justify-center space-x-4">
-          {player1Deck.slice(0, 2).map((card, idx) => (
+          {player1Active.map((card, idx) => (
             <BattleCard
               key={idx}
-              big
               character={card.character}
-              selectedMoves={card.character.selectedMoves} // 🔹 Pass selected moves
               currentHP={card.currentHP}
               maxHP={card.maxHP}
-              {...card.props}
+              selectedMoves={card.character.selectedMoves}
             />
           ))}
         </div>
@@ -102,49 +97,22 @@ export default function BattlePage() {
         </div>
       </div>
 
-      {/* Player 2 Deck Modal */}
-      <Dialog open={player2DeckOpen} onOpenChange={setPlayer2DeckOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Player 2 Deck</DialogTitle>
-          </DialogHeader>
-          <div className="flex space-x-4">
-            {player2Deck.map((card, idx) => (
-              <BattleCard
-                key={idx}
-                character={card.character}
-                selectedMoves={card.character.selectedMoves} // 🔹 Pass selected moves
-                currentHP={card.currentHP}
-                maxHP={card.maxHP}
-                {...card.props}
-              />
-            ))}
-          </div>
-        </DialogContent>
-      </Dialog>
+      {/* Player 2 Deck Modal - benched only */}
+      <DeckModal
+        open={player2DeckOpen}
+        onOpenChange={setPlayer2DeckOpen}
+        title="Player 2 Deck"
+        deck={player2Benched} // Only benched cards
+      />
 
-      {/* Player 1 Deck Modal */}
-      <Dialog open={player1DeckOpen} onOpenChange={setPlayer1DeckOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Player 1 Deck</DialogTitle>
-          </DialogHeader>
-          <div className="flex space-x-4">
-            {player1Deck.map((card, idx) => (
-              <div key={idx} className="flex flex-col items-center">
-                <BattleCard
-                  character={card.character}
-                  selectedMoves={card.character.selectedMoves} // 🔹 Pass selected moves
-                  currentHP={card.currentHP}
-                  maxHP={card.maxHP}
-                  {...card.props}
-                />
-                <Button className="mt-2">Swap In</Button>
-              </div>
-            ))}
-          </div>
-        </DialogContent>
-      </Dialog>
+      {/* Player 1 Deck Modal - benched only */}
+      <DeckModal
+        open={player1DeckOpen}
+        onOpenChange={setPlayer1DeckOpen}
+        title="Player 1 Deck"
+        deck={player1Benched} // Only benched cards
+        showSwap
+      />
     </div>
   );
 }
