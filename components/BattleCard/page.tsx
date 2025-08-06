@@ -3,10 +3,9 @@ import { useState } from "react";
 import { AiOutlineInfoCircle } from "react-icons/ai";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
-type Move = { name: string; type: string; power?: number; description?: string };
-type Ability = { name: string; description: string };
-
-type Character = {
+export type Move = { name: string; type: string; power?: number; description?: string };
+export type Ability = { name: string; description: string };
+export type Character = {
   id: number;
   name: string;
   title: string;
@@ -23,11 +22,17 @@ export default function BattleCard({
   currentHP,
   maxHP,
   selectedMoves: initialSelectedMoves,
+  onMoveSelect,
+  selectedMove,
+  disabled = false,
 }: {
   character: Character;
   currentHP: number;
   maxHP: number;
   selectedMoves?: Move[];
+  onMoveSelect?: (move: Move | null) => void;
+  selectedMove?: Move | null;
+  disabled?: boolean;
 }) {
   const [flipped, setFlipped] = useState(false);
 
@@ -49,6 +54,15 @@ export default function BattleCard({
 
   const cardWidth = "180px";
   const cardHeight = "280px";
+
+  const handleMoveClick = (move: Move) => {
+    if (disabled) return;
+    if (selectedMove?.name === move.name) {
+      onMoveSelect?.(null);
+    } else {
+      onMoveSelect?.(move);
+    }
+  };
 
   return (
     <TooltipProvider>
@@ -125,76 +139,76 @@ export default function BattleCard({
               {/* Abilities Section */}
               {character.abilities && (
                 <div style={{ marginTop: "4px", marginBottom: "5px" }}>
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      fontSize: "10px",
-                      color: "#fff",
-                      marginBottom: "3px",
-                    }}
-                  >
-                    <strong>Special:</strong>&nbsp;{" "}
-                    {character.abilities.special?.name || "Unknown"}
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <AiOutlineInfoCircle className="ml-1 cursor-pointer" />
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        {character.abilities.special?.description || "No description available"}
-                      </TooltipContent>
-                    </Tooltip>
-                  </div>
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      fontSize: "10px",
-                      color: "#fff",
-                    }}
-                  >
-                    <strong>Hidden:</strong>&nbsp; {character.abilities.hidden?.name || "Unknown"}
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <AiOutlineInfoCircle className="ml-1 cursor-pointer" />
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        {character.abilities.hidden?.description || "No description available"}
-                      </TooltipContent>
-                    </Tooltip>
-                  </div>
+                  {["special", "hidden"].map((type) => (
+                    <div
+                      key={type}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        fontSize: "10px",
+                        color: "#fff",
+                        marginBottom: "3px",
+                      }}
+                    >
+                      <strong>{type === "special" ? "Special" : "Hidden"}:</strong>&nbsp;
+                      {character.abilities[type as "special" | "hidden"]?.name || "Unknown"}
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <AiOutlineInfoCircle className="ml-1 cursor-pointer" />
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          {character.abilities[type as "special" | "hidden"]?.description ||
+                            "No description available"}
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                  ))}
                 </div>
               )}
 
-              {/* Move List (read-only) */}
+              {/* Move List */}
               <ul style={{ padding: 0, listStyle: "none", marginTop: "4px" }}>
-                {selectedMoves.map((move, idx) => (
-                  <li
-                    key={idx}
-                    style={{
-                      fontSize: "10px",
-                      fontWeight: "bold",
-                      color: "#fff",
-                      background: `linear-gradient(135deg, ${theme.primaryColor}, ${theme.secondaryColor})`,
-                      border: `1.5px solid ${theme.borderColor}`,
-                      borderRadius: "6px",
-                      padding: "3px",
-                      marginBottom: "3px",
-                      boxShadow: `0 0 4px ${theme.glowColor}`,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                    }}
-                  >
-                    {move.name}
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <AiOutlineInfoCircle className="ml-2 cursor-pointer" />
-                      </TooltipTrigger>
-                      <TooltipContent>{move.description}</TooltipContent>
-                    </Tooltip>
-                  </li>
-                ))}
+                {selectedMoves.map((move, idx) => {
+                  const isSelected = selectedMove?.name === move.name;
+                  const isDisabled = !!selectedMove && !isSelected;
+                  return (
+                    <li
+                      key={idx}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (isDisabled) return;
+                        handleMoveClick(move);
+                      }}
+                      style={{
+                        fontSize: "10px",
+                        fontWeight: "bold",
+                        color: "#fff",
+                        background: isSelected
+                          ? "linear-gradient(135deg, #FFD700, #FFA500)"
+                          : `linear-gradient(135deg, ${theme.primaryColor}, ${theme.secondaryColor})`,
+                        border: `1.5px solid ${theme.borderColor}`,
+                        borderRadius: "6px",
+                        padding: "3px",
+                        marginBottom: "3px",
+                        boxShadow: `0 0 4px ${theme.glowColor}`,
+                        opacity: disabled ? 0.4 : isDisabled ? 0.5 : 1,
+                        cursor: disabled ? "not-allowed" : "pointer",
+                        transition: "all 0.2s",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                      }}
+                    >
+                      <span>{move.name}</span>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <AiOutlineInfoCircle className="ml-2 cursor-pointer" />
+                        </TooltipTrigger>
+                        <TooltipContent>{move.description}</TooltipContent>
+                      </Tooltip>
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           </div>
@@ -272,12 +286,8 @@ export default function BattleCard({
         <style>{`
           .card { position: relative; }
           .flipped { transform: rotateY(180deg); }
-          /* Mobile adjustments */
           @media (max-width: 768px) {
-            .card {
-              width: 140px !important;
-              height: 220px !important;
-            }
+            .card { width: 140px !important; height: 220px !important; }
             .card h2 { font-size: 11px !important; }
             .card li { font-size: 9px !important; padding: 2px !important; }
           }

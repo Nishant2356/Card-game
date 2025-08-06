@@ -37,7 +37,7 @@ model Move {
   categories         String[]  // e.g., ["target", "domain", "protection", "exception"]
   roles              String[]  // e.g., ["damage", "support"]
   effects            String[]  // e.g., ["buff", "debuff"]
-  affectedStats      String[]  // e.g., ["hp", "attack", "defense", "speed"]
+  affectedStats      Json       // e.g., [{ "stat": "attack", "amount": -40 }, { "stat": "speed", "amount": -20 }]
 
   // Battle mechanics
   power              Int       // 0–100

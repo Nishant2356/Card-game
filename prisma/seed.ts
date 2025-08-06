@@ -2,103 +2,49 @@ import { PrismaClient } from "@prisma/client";
 const prisma = new PrismaClient();
 
 async function main() {
-  await prisma.character.createMany({
+  await prisma.move.createMany({
     data: [
       {
-        name: "Zenitsu Agatsuma",
-        title: "Demon Slayer",
-        universe: "Demon Slayer",
-        image: "https://wallpapers.com/images/hd/demon-slayer-zenitsu-pfp-oaizqqb7636rfdzf.jpg",
-        description: "A member of the Demon Slayer Corps, Zenitsu wields Thunder Breathing with extraordinary speed and reflexes, often revealing his true potential in unconscious states.",
-        stats: { hp: 90, speed: 99, strength: 85, power: 88, agility: 95 },
-        movePool: [
-          { name: "First Form: Thunderclap and Flash (Six Fold)", type: "Physical", power: 80, description: "Executes six rapid consecutive slashes at lightning speed." },
-          { name: "Thunderclap and Flash: God Speed", type: "Ultimate", power: 105, description: "Zenitsu pushes his speed to the maximum, striking with blinding force." },
-          { name: "Seventh Form: Honoikazuchi no Kami", type: "Ultimate", power: 110, description: "Unleashes a lightning dragon-like attack, embodying thunder’s fury." },
-          { name: "Enhanced Hearing Combat Reflex", type: "Passive", power: 0, description: "Uses superhuman hearing to predict enemy movements and react instinctively." }
-        ],
-        abilities: {
-          special: { name: "Lightning Reflex", effect: "Increases dodge chance by 25% when HP drops below 50%." }
-        },
-        theme: {
-          primaryColor: "#fffa65",
-          secondaryColor: "#ffb300",
-          borderColor: "yellow",
-          glowColor: "rgba(255, 255, 0, 0.7)"
-        }
+        name: "Contorted Dodge",
+        categories: ["target"],
+        roles: ["support"],
+        effects: ["buff"],
+        affectedStats: [{ "stat": "speed", "amount": 25 }, { "stat": "defense", "amount": 15 }],
+        power: 0,
+        accuracy: 95,
+        targetTypes: ["self"],
+        duration: 1,
+        moveType: "special",
+        contact: false,
+        exceptionHandler: null,
+        moveSound: null,
+        animation: null,
+        relatedCharacters: ["7", "Gyutaro"],
+        description: "Using his unnaturally flexible body, increasing his speed and defense for a short time."
       },
-      {
-        name: "Gyutaro",
-        title: "Upper Moon 6",
-        universe: "Demon Slayer",
-        image: "https://imgs.search.brave.com/FGN7EtFBlpglZnsmugYlMaeDd97-hnFANGJ453MqIj0/rs:fit:500:0:1:0/g:ce/aHR0cHM6Ly9jZG4u/YW5pbWUtcGxhbmV0/LmNvbS9jaGFyYWN0/ZXJzL3ByaW1hcnkv/Z3l1dGFyby0xLTI4/NXg0MDAud2VicD90/PTE2NDI3Mjg4ODA",
-        description: "An Upper Rank Six demon of the Twelve Kizuki, Gyutaro wields deadly poisoned blood sickles and an unrelenting hatred for Demon Slayers.",
-        stats: { hp: 99, speed: 93, strength: 95, power: 94, poisonPotency: 100 },
-        movePool: [
-          { name: "Sickle Slash Barrage", type: "Physical", power: 90, description: "Unleashes a rapid flurry of deadly sickle strikes." },
-          { name: "Rotating Circular Slashes", type: "Physical", power: 85, description: "Creates rotating arcs of slashes to overwhelm opponents." },
-          { name: "Flying Blood Sickles", type: "Ranged", power: 95, description: "Launches blood-infused sickles that slice through enemies at high speed." },
-          { name: "Poisoned Blood Sickle Strike", type: "Special", power: 100, description: "A devastating poisoned slash that weakens and damages targets over time." }
-        ],
-        abilities: {
-          special: { name: "Demonic Regeneration", effect: "Heals 10% HP every turn and nullifies poison effects on self." }
-        },
-        theme: {
-          primaryColor: "#004d26",
-          secondaryColor: "#007a33",
-          borderColor: "#00ff66",
-          glowColor: "rgba(0, 255, 128, 0.6)"
-        }
-      },
-      {
-        name: "Obanai Iguro",
-        title: "Serpent Hashira",
-        universe: "Demon Slayer",
-        image: "https://i.ebayimg.com/images/g/-igAAeSw5pRoGT9Q/s-l500.jpg",
-        description: "The Serpent Hashira of the Demon Slayer Corps, Obanai Iguro uses swift, twisting strikes and serpent-like movements with precision and lethality.",
-        stats: { hp: 91, speed: 94, strength: 89, serpentAgility: 96, venomResistance: 92 },
-        movePool: [
-          { name: "First Form: Winding Serpent Slash", type: "Physical", power: 85, description: "A winding slash mimicking the unpredictable movement of a serpent." },
-          { name: "Third Form: Coil of the Serpent", type: "Physical", power: 88, description: "Encircles the target with coiling strikes to restrict their movement." },
-          { name: "Fourth Form: Twin-Headed Reptile", type: "Physical", power: 92, description: "A two-directional attack imitating the dual strike of a serpent." },
-          { name: "Fifth Form: Slithering Serpent", type: "Special", power: 94, description: "A swift, slithering technique allowing seamless evasion and counterattacks." }
-        ],
-        abilities: {
-          special: { name: "Serpent Reflexes", effect: "Increases dodge rate by 25% and grants immunity to binding effects." }
-        },
-        theme: {
-          primaryColor: "#f5f5f5",
-          secondaryColor: "#c8a2ff",
-          borderColor: "#b399ff",
-          glowColor: "rgba(179, 153, 255, 0.6)"
-        }
-      },
-      {
-        name: "Doma",
-        title: "Upper Moon 2",
-        universe: "Demon Slayer",
-        image: "https://wallpapercave.com/wp/wp10836762.jpg",
-        description: "The Upper Rank 2 demon of the Twelve Kizuki, Doma wields deadly cryokinesis, freezing everything in his path with ruthless elegance.",
-        stats: { hp: 99, speed: 96, strength: 94, iceManipulation: 100, regeneration: 98 },
-        movePool: [
-          { name: "Frozen Lotus", type: "Special", power: 90, description: "Unleashes icy lotus flowers that freeze anything they touch." },
-          { name: "Frozen Cloud", type: "Special", power: 88, description: "Generates a freezing mist to obscure vision and freeze targets." },
-          { name: "Lotus Frost Bite", type: "Physical", power: 92, description: "A frost-infused strike that chills opponents to the core." },
-          { name: "Devouring Frost", type: "Ultimate", power: 110, description: "A devastating freezing technique that engulfs everything in lethal frost." }
-        ],
-        abilities: {
-          special: { name: "Cryokinesis Mastery", effect: "Immune to cold-based attacks and increases ice attack power by 30%." }
-        },
-        theme: {
-          primaryColor: "#f0f9ff",
-          secondaryColor: "#66ccff",
-          borderColor: "#80e6ff",
-          glowColor: "rgba(150, 220, 255, 0.6)"
-        }
-      }
-            
       
-            
+      {
+        name: "Cursed Blood Mist",
+        categories: ["target"],
+        roles: ["support"],
+        effects: ["debuff"],
+        affectedStats: [{ "stat": "hp", "amount": -15 }],
+        power: 0,
+        accuracy: 100,
+        targetTypes: ["all"],
+        duration: 3,
+        moveType: "special",
+        contact: false,
+        exceptionHandler: null,
+        moveSound: null,
+        animation: null,
+        relatedCharacters: ["7", "Gyutaro"],
+        description: "Gyutaro releases a toxic mist of his blood across the battlefield, poisoning all enemies and lowering their attack power."
+      }
+      
+
+
+                   
       // {
       //   name: "Satoru Gojo",
       //   title: "Jujutsu Sorcerer",
