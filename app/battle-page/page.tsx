@@ -46,12 +46,20 @@ export default function BattlePage() {
     player: "Player 1" | "Player 2";
   } | null>(null);
   const [tempTargets, setTempTargets] = useState<{ character: Character, player: "Player 1" | "Player 2" }[]>([]);
-  const [glowingCards, setGlowingCards] = useState<{
-    moveMaker: number | null;
-    targets: number[];
-  }>({ moveMaker: null, targets: [] });
+  const [glowingCards, setGlowingCards] = useState<{ moveMaker: number | null; targets: number[] }>({ moveMaker: null, targets: [] });
   const [round, setRound] = useState(1);
   const [statEffects, setStatEffects] = useState<StatEffect[]>([]);
+
+  // --- New state for swap-selection modal ---
+  // This state holds whether the swap-selection modal ("choose which active slot to swap with") is open
+  const [swapSelectorOpen, setSwapSelectorOpen] = useState(false);
+  // pendingSwap stores the bench index and swapPlayer passed from the DeckModal via swapMethod
+  const [pendingSwap, setPendingSwap] = useState<{ benchIndex: number; swapPlayer: string } | null>(null);
+  // which active slot (0 or 1) the user selected in the swap-selection modal
+  const [selectedActiveIndexForSwap, setSelectedActiveIndexForSwap] = useState<number | null>(null);
+  // pending toast message to avoid calling toast during render
+  const [pendingToastMessage, setPendingToastMessage] = useState<string | null>(null);
+  // ------------------------------------------------
 
   // Helper for unique keys
   const getUniqueKey = (player: string, id: string | number) => `${player}-${id}`;
@@ -76,6 +84,35 @@ export default function BattlePage() {
       audioRef.current?.pause();
     };
   }, []);
+
+  // Close deck modal and open swap selector when pendingSwap is set.
+  // Using useEffect ensures these setState calls run after render (fixes "setState during render" error).
+  useEffect(() => {
+    if (!pendingSwap) return;
+
+    const isPlayer1 = pendingSwap.swapPlayer.toLowerCase().includes("player 1");
+
+    // Close the deck modal first (so it doesn't remain open under the new modal)
+    if (isPlayer1) setPlayer1DeckOpen(false);
+    else setPlayer2DeckOpen(false);
+
+    // Open swap selector on next tick to avoid UI race with closing modal
+    const t = setTimeout(() => setSwapSelectorOpen(true), 0);
+    return () => clearTimeout(t);
+  }, [pendingSwap]);
+
+  // Effect to safely show toast messages (prevents toast being called during render)
+  useEffect(() => {
+    if (!pendingToastMessage) return;
+    toast(pendingToastMessage, {
+      icon: '⚡',
+      style: {
+        background: '#333',
+        color: '#fff',
+      },
+    });
+    setPendingToastMessage(null);
+  }, [pendingToastMessage]);
 
   // Handle stat effects at the end of each round
   useEffect(() => {
@@ -260,7 +297,7 @@ export default function BattlePage() {
     return new Promise((resolve) => {
       const audio = new Audio(`/sounds/moves/${soundPath}`);
       audio.onended = () => resolve();
-      audio.play();
+      audio.play().catch(() => resolve());
     });
   };
 
@@ -307,11 +344,107 @@ export default function BattlePage() {
       return null;
     }
   };
-  
+
+  // Swap method: opens a modal that asks which active card to swap with.
+  // DeckModal calls swapMethod(benchIndex, swapPlayer). We store that pending request
+  // and render a small modal with the player's active cards so user can pick which active slot to swap.
+  const swapMethod = (benchIndex: number, swapPlayer: string): void => {
+    // store pending swap but DO NOT call other setState that might run during render of other components
+    // this avoids calling setState during render. useEffect (watching pendingSwap) will close deck modal and open selector.
+    setPendingSwap({ benchIndex, swapPlayer });
+    setSelectedActiveIndexForSwap(null);
+  };
+
+  const confirmSwap = () => {
+    if (!pendingSwap || selectedActiveIndexForSwap === null) return;
+
+    const { benchIndex, swapPlayer } = pendingSwap;
+    const isPlayer1 = swapPlayer.toLowerCase().includes("player 1");
+
+    if (isPlayer1) {
+      // compute using current state (avoid side-effects inside setState updater)
+      const prev = player1Deck;
+      const active = prev.slice(0, 2);
+      const benched = prev.slice(2);
+
+      if (benched.length === 0) {
+        // nothing to swap
+        setSwapSelectorOpen(false);
+        setPendingSwap(null);
+        setSelectedActiveIndexForSwap(null);
+        return;
+      }
+
+      const bIndex = Math.max(0, Math.min(benchIndex, benched.length - 1));
+      const aIndex = Math.max(0, Math.min(selectedActiveIndexForSwap, active.length - 1));
+
+      const newActive = [...active];
+      const newBenched = [...benched];
+
+      const benchCard = newBenched[bIndex];
+      const activeCard = newActive[aIndex];
+
+      newActive[aIndex] = benchCard;
+      newBenched[bIndex] = activeCard;
+
+      const newDeck = [...newActive, ...newBenched];
+
+      setPlayer1Deck(newDeck);
+
+      // Queue toast to run after render
+      setPendingToastMessage(`${benchCard.character.name} swapped into active!`);
+
+      // close swap selector after swap
+      setSwapSelectorOpen(false);
+      setPendingSwap(null);
+      setSelectedActiveIndexForSwap(null);
+    } else {
+      const prev = player2Deck;
+      const active = prev.slice(0, 2);
+      const benched = prev.slice(2);
+
+      if (benched.length === 0) {
+        setSwapSelectorOpen(false);
+        setPendingSwap(null);
+        setSelectedActiveIndexForSwap(null);
+        return;
+      }
+
+      const bIndex = Math.max(0, Math.min(benchIndex, benched.length - 1));
+      const aIndex = Math.max(0, Math.min(selectedActiveIndexForSwap, active.length - 1));
+
+      const newActive = [...active];
+      const newBenched = [...benched];
+
+      const benchCard = newBenched[bIndex];
+      const activeCard = newActive[aIndex];
+
+      newActive[aIndex] = benchCard;
+      newBenched[bIndex] = activeCard;
+
+      const newDeck = [...newActive, ...newBenched];
+
+      setPlayer2Deck(newDeck);
+
+      // Queue toast to run after render
+      setPendingToastMessage(`${benchCard.character.name} swapped into active!`);
+
+      // close swap selector after swap
+      setSwapSelectorOpen(false);
+      setPendingSwap(null);
+      setSelectedActiveIndexForSwap(null);
+    }
+  };
+
+  const cancelSwap = () => {
+    setSwapSelectorOpen(false);
+    setPendingSwap(null);
+    setSelectedActiveIndexForSwap(null);
+  };
 
   const processDamageMoves = async (damageMove: SelectedMove, updatedPlayer1Deck: any[], updatedPlayer2Deck: any[]) => {
 
-    const damage = damageMove.move.power;
+    const damage = damageMove.move.power || 0;
 
     damageMove.targets.forEach((target) => {
       const targetDeck = target.player === "Player 1" ? updatedPlayer1Deck : updatedPlayer2Deck;
@@ -320,9 +453,6 @@ export default function BattlePage() {
       if (targetIndex !== -1) {
         const currentHP = targetDeck[targetIndex].currentStats.hp;
         const newHP = Math.max(0, currentHP - damage);
-        // console.log(
-        //   `${damageMove.moveMaker.name} hit ${target.character.name} with ${damageMove.move.name} for ${damage} damage (HP: ${currentHP} → ${newHP})`
-        // );
 
         targetDeck[targetIndex] = {
           ...targetDeck[targetIndex],
@@ -353,40 +483,37 @@ export default function BattlePage() {
   };
 
   const processHealMoves = (healMove: SelectedMove, updatedPlayer1Deck: any[], updatedPlayer2Deck: any[]) => {
-  const healing = healMove.move.healamount;
+    const healing = healMove.move.healamount || 0;
 
-  healMove.targets.forEach((target) => {
-    const targetDeck = target.player === "Player 1" ? updatedPlayer1Deck : updatedPlayer2Deck;
-    const targetIndex = targetDeck.findIndex(c => c.character.id === target.character.id);
-    if (targetIndex !== -1) {
-      const currentHP = targetDeck[targetIndex].currentStats.hp;
-      const newHP = Math.min(100, currentHP + healing);
-      console.log(newHP)
-      // console.log(
-      //   `${damageMove.moveMaker.name} hit ${target.character.name} with ${damageMove.move.name} for ${damage} damage (HP: ${currentHP} → ${newHP})`
-      // );
+    healMove.targets.forEach((target) => {
+      const targetDeck = target.player === "Player 1" ? updatedPlayer1Deck : updatedPlayer2Deck;
+      const targetIndex = targetDeck.findIndex(c => c.character.id === target.character.id);
+      if (targetIndex !== -1) {
+        const currentHP = targetDeck[targetIndex].currentStats.hp;
+        const maxHP = targetDeck[targetIndex].maxHP || 100;
+        const newHP = Math.min(maxHP, currentHP + healing);
 
-      targetDeck[targetIndex] = {
-        ...targetDeck[targetIndex],
-        currentStats: {
-          ...targetDeck[targetIndex].currentStats,
-          hp: newHP
-        },
-      };
-  }
-  });
-};
+        targetDeck[targetIndex] = {
+          ...targetDeck[targetIndex],
+          currentStats: {
+            ...targetDeck[targetIndex].currentStats,
+            hp: newHP
+          },
+        };
+      }
+    });
+  };
 
   const processTargetMoves = async ( targetMove: SelectedMove, updatedPlayer1Deck: any[], updatedPlayer2Deck: any[]) => {
-    const roles = targetMove.move.roles
+    const roles = targetMove.move.roles || [];
     for (const role of roles) {
       if (role === "damage") {
         await processDamageMoves(targetMove, updatedPlayer1Deck, updatedPlayer2Deck);
       } else if (role === "support") {
-        processSupportMoves(targetMove, targetMove.move.affectedStats);
+        processSupportMoves(targetMove, targetMove.move.affectedStats || []);
       } else if (role === "selfheal") {
-        const newTargetMove = targetMove;
-        newTargetMove.targets = [{character: targetMove.moveMaker, player: targetMove.player}]
+        const newTargetMove = { ...targetMove };
+        newTargetMove.targets = [{character: targetMove.moveMaker, player: targetMove.player}];
         processHealMoves(newTargetMove, updatedPlayer1Deck, updatedPlayer2Deck);
       } else if (role === "healpartymember") {
         const currentDecks = {
@@ -424,7 +551,7 @@ export default function BattlePage() {
             player: targetMove.player
           }]
         };
-        processSupportMoves(selfSupportMove, selfSupportMove.move.affectedStats2);
+        processSupportMoves(selfSupportMove, selfSupportMove.move.affectedStats2 || []);
       } else if (role === "supportpartymember") {
         const currentDecks = {
           player1: player1Active,
@@ -446,7 +573,7 @@ export default function BattlePage() {
           }]
         };
       
-        processSupportMoves(partySupportMove, targetMove.move.affectedStats2);
+        processSupportMoves(partySupportMove, targetMove.move.affectedStats2 || []);
       }
     }
   };
@@ -495,7 +622,6 @@ export default function BattlePage() {
       }
 
       if (!didHit(move.accuracy)) {
-        // console.log(`${damageMove.move.name} MISSED!`);
         await new Promise((res) => setTimeout(res, 1000));
         setGlowingCards({ moveMaker: null, targets: [] });
         continue;
@@ -518,9 +644,9 @@ export default function BattlePage() {
       await new Promise((res) => setTimeout(res, 1000));
     }
 
-    setRound(prev => prev + 1)
-    console.log(player1Deck)
-    console.log(player2Deck)
+    setRound(prev => prev + 1);
+    console.log(player1Deck);
+    console.log(player2Deck);
   };
 
   const handleConfirm = () => {
@@ -528,7 +654,6 @@ export default function BattlePage() {
     if (turn === "Player 1") {
       setTurn("Player 2");
     } else {
-      // console.log("Confirmed moves before execution:", selectedMoves);
       processMoves(selectedMoves);
       setTurn("Player 1");
       setSelectedMoves([]);
@@ -591,7 +716,7 @@ export default function BattlePage() {
               maxHP={card.maxHP}
               currentStats={card.currentStats}
               selectedMoves={card.character.selectedMoves}
-              onMoveSelect={(move) => handleMoveSelect("Player 1", card.character, card.currentHP, move)}
+              onMoveSelect={(move) => handleMoveSelect("Player 1", card.character, card.currentStats.hp, move)}
               selectedMove={
                 selectedMoves.find((m) => m.player === "Player 1" && m.moveMaker.id === card.character.id)
                   ?.move
@@ -623,16 +748,57 @@ export default function BattlePage() {
       )}
 
       {/* Player 2 Deck Modal */}
-      <DeckModal open={player2DeckOpen} onOpenChange={setPlayer2DeckOpen} title="Player 2 Deck" deck={player2Benched} showSwap />
+      <DeckModal open={player2DeckOpen} swapMethod={swapMethod} onOpenChange={setPlayer2DeckOpen} title="Player 2 Deck" deck={player2Benched} showSwap />
 
       {/* Player 1 Deck Modal */}
       <DeckModal
         open={player1DeckOpen}
+        swapMethod={swapMethod}
         onOpenChange={setPlayer1DeckOpen}
         title="Player 1 Deck"
         deck={player1Benched}
         showSwap
       />
+
+      {/* Swap selector modal - appears after DeckModal calls swapMethod(benchIndex, swapPlayer) */}
+      {swapSelectorOpen && pendingSwap && (
+        <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50">
+          <div className="bg-gray-800 p-6 rounded-lg max-w-xl w-full">
+            <h3 className="text-white text-lg mb-4">Choose active card to swap with ({pendingSwap.swapPlayer})</h3>
+
+            <div className="flex flex-wrap gap-4 mb-4">
+              {(pendingSwap.swapPlayer.toLowerCase().includes("player 1") ? player1Active : player2Active).length === 0 ? (
+                <p className="text-white">No active cards available to swap.</p>
+              ) : (
+                (pendingSwap.swapPlayer.toLowerCase().includes("player 1") ? player1Active : player2Active).map((card, idx) => {
+                  const selected = selectedActiveIndexForSwap === idx;
+                  return (
+                    <div
+                      key={getUniqueKey("swapActive", `${pendingSwap.swapPlayer}-${card.character.id}`)}
+                      className={`p-2 rounded-lg cursor-pointer border ${selected ? "border-yellow-400" : "border-transparent"}`}
+                      onClick={() => setSelectedActiveIndexForSwap(idx)}
+                    >
+                      <img src={card.character.image} alt={card.character.name} className="w-24 h-24 object-cover" />
+                      <p className="text-white text-center mt-1">{card.character.name}</p>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="flex gap-2 justify-end">
+              <button
+                className="px-4 py-2 bg-green-600 text-white rounded disabled:opacity-50"
+                disabled={selectedActiveIndexForSwap === null}
+                onClick={confirmSwap}
+              >
+                Confirm Swap
+              </button>
+              <button className="px-4 py-2 bg-red-600 text-white rounded" onClick={cancelSwap}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Target Selection Modal */}
       {targetModal && (

@@ -4,12 +4,14 @@ import PlayerDeck from "@/components/PlayerDeck/PlayerDeck";
 
 export default function DeckModal({
   open,
+  swapMethod,
   onOpenChange,
   title,
   deck,
   showSwap = false,
 }: {
   open: boolean;
+  swapMethod: (swapIndex: number, swapPlayer: string) => void;
   onOpenChange: (open: boolean) => void;
   title: string;
   deck: any[];
@@ -21,7 +23,7 @@ export default function DeckModal({
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
-        <PlayerDeck deck={deck} showSwap={showSwap} />
+        <PlayerDeck deck={deck} title={title} swapMethod={swapMethod} showSwap={showSwap} />
       </DialogContent>
     </Dialog>
   );

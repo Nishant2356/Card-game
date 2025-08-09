@@ -4,9 +4,13 @@ import { Button } from "@/components/ui/button";
 
 export default function PlayerDeck({
   deck,
+  title,
+  swapMethod,
   showSwap = false,
 }: {
   deck: any[];
+  title: string;
+  swapMethod: (swapIndex: number, swapPlayer: string) => void;
   showSwap?: boolean;
 }) {
   const getUniqueKey = (player: string, id: string | number) => `${player}-${id}`;
@@ -15,7 +19,7 @@ export default function PlayerDeck({
       {deck.map((card, idx) => (
         <div key={idx} className="flex flex-col items-center">
             <BattleCard
-              key={getUniqueKey("Player1", card.character.id)}
+              key={getUniqueKey(title, card.character.id)}
               character={card.character}
               currentHP={card.currentStats.hp}
               maxHP={card.maxHP}
@@ -27,7 +31,7 @@ export default function PlayerDeck({
               isGlowing={false}
               isTargetGlowing={false}
             />
-          {showSwap && <Button className="mt-2">Swap In</Button>}
+          {showSwap && <Button onClick={() => swapMethod(idx, title)} className="mt-2">Swap In</Button>}
         </div>
       ))}
     </div>
