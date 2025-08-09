@@ -35,13 +35,15 @@ model Move {
 
   // Classification
   categories         String[]  // e.g., ["target", "domain", "protection", "exception"]
-  roles              String[]  // e.g., ["damage", "support"]
+  roles              String[]  // e.g., ["damage", "support", "selfsupport", "supportpartymember" "selfheal", "healpartymember"]
   effects            String[]  // e.g., ["buff", "debuff"]
   affectedStats      Json       // e.g., [{ "stat": "attack", "amount": -40 }, { "stat": "speed", "amount": -20 }]
+  affectedStats2     Json       // e.g., [{ "stat": "attack", "amount": -40 }, { "stat": "speed", "amount": -20 }]
 
   // Battle mechanics
   power              Int       // 0–100
   accuracy           Int       // 0–100
+  healamount         Int
   targetTypes        String[]  // e.g., ["single", "double", "all", "self"]
   duration           Int       // Duration in turns
   moveType           String    // "physical" | "special"

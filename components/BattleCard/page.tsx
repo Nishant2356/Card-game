@@ -3,7 +3,30 @@ import { useState } from "react";
 import { AiOutlineInfoCircle } from "react-icons/ai";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
-export type Move = { name: string; type: string; power?: number; description?: string };
+export type Move = {
+  id: string;
+  name: string;
+  categories: string[];
+  roles: string[];
+  effects: string[];
+  affectedStats: { stat: string; amount: number }[];
+  affectedStats2: { stat: string; amount: number }[];
+  power: number;
+  accuracy: number;
+  healamount: number
+  targetTypes: string[];
+  duration: number;
+  moveType: "physical" | "special";
+  contact: boolean;
+  exceptionHandler?: string;
+  moveSound?: string;
+  animation?: string;
+  relatedCharacters: string[];
+  description?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type Ability = { name: string; description: string };
 export type Character = {
   id: number;
@@ -17,23 +40,31 @@ export type Character = {
   theme: { primaryColor: string; secondaryColor: string; borderColor: string; glowColor: string };
 };
 
-export default function BattleCard({
-  character,
-  currentHP,
-  maxHP,
-  selectedMoves: initialSelectedMoves,
-  onMoveSelect,
-  selectedMove,
-  disabled = false,
-}: {
+interface BattleCardProps {
   character: Character;
   currentHP: number;
   maxHP: number;
+  currentStats: { hp: number; attack: number; defense: number; speed: number };
   selectedMoves?: Move[];
   onMoveSelect?: (move: Move | null) => void;
   selectedMove?: Move | null;
   disabled?: boolean;
-}) {
+  isGlowing?: boolean;
+  isTargetGlowing?: boolean;
+}
+
+export default function BattleCard({
+  character,
+  currentHP,
+  maxHP,
+  currentStats,
+  selectedMoves: initialSelectedMoves,
+  onMoveSelect,
+  selectedMove,
+  disabled = false,
+  isGlowing = false,
+  isTargetGlowing = false,
+}: BattleCardProps) {
   const [flipped, setFlipped] = useState(false);
 
   const selectedMoves =
@@ -55,6 +86,12 @@ export default function BattleCard({
   const cardWidth = "180px";
   const cardHeight = "280px";
 
+  const glowStyle = isGlowing 
+    ? { boxShadow: `0 0 20px 10px rgba(0, 255, 0, 0.7)` }
+    : isTargetGlowing
+    ? { boxShadow: `0 0 20px 10px rgba(255, 0, 0, 0.7)` }
+    : { boxShadow: `0 0 20px ${theme.glowColor}` };
+
   const handleMoveClick = (move: Move) => {
     if (disabled) return;
     if (selectedMove?.name === move.name) {
@@ -74,8 +111,8 @@ export default function BattleCard({
             height: cardHeight,
             borderRadius: "14px",
             transformStyle: "preserve-3d",
-            transition: "transform 0.8s",
-            boxShadow: `0 0 20px ${theme.glowColor}`,
+            transition: "transform 0.8s, box-shadow 0.3s",
+            ...glowStyle,
           }}
         >
           {/* HP Bar */}
@@ -251,7 +288,7 @@ export default function BattleCard({
               <h2 style={{ textAlign: "center", fontSize: "13px", marginBottom: "6px" }}>
                 Stats
               </h2>
-              {Object.entries(character.stats).map(([key, value]) => (
+              {Object.entries(currentStats).map(([key, value]) => (
                 <div
                   key={key}
                   style={{ margin: "4px 0", display: "flex", justifyContent: "space-between" }}
