@@ -1,16 +1,20 @@
 "use client";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import BattleCard, { Move, Character } from "@/components/BattleCard/page";
 import DeckModal from "../modals/DeckModal";
 import toast, { Toaster } from "react-hot-toast";
 import { v4 as uuidv4 } from 'uuid';
+import { useRouter } from "next/navigation";
 
 type TargetDetails = {
+  deckid: string;
   character: Character;
   player: "Player 1" | "Player 2";
+  targetIndex: number; // index of the active slot at selection time (0..)
 };
 
 type SelectedMove = {
+  deckid: string; // deckid of the move maker card
   player: "Player 1" | "Player 2";
   moveMaker: Character;
   targets: TargetDetails[];
@@ -37,27 +41,42 @@ export default function BattlePage() {
   const [player2DeckOpen, setPlayer2DeckOpen] = useState(false);
   const [player1Deck, setPlayer1Deck] = useState<any[]>([]);
   const [player2Deck, setPlayer2Deck] = useState<any[]>([]);
+  const [faintedPlayer1, setFaintedPlayer1] = useState<{ [key: string]: boolean }>({});
+  const [faintedPlayer2, setFaintedPlayer2] = useState<{ [key: string]: boolean }>({});
+  const [teamsLoaded, setTeamsLoaded] = useState(false);
+  const [allMoveDetails, setAllMoveDetails] = useState<any[]>([]);
+
+
+  const router = useRouter();
+  // derive counts from decks
+  const activePlayer1Count = useMemo(
+    () => player1Deck.filter(c => (c.currentStats?.hp ?? 0) > 0).length,
+    [player1Deck]
+  );
+  const activePlayer2Count = useMemo(
+    () => player2Deck.filter(c => (c.currentStats?.hp ?? 0) > 0).length,
+    [player2Deck]
+  );
+
   const [turn, setTurn] = useState<"Player 1" | "Player 2">("Player 1");
   const [selectedMoves, setSelectedMoves] = useState<SelectedMove[]>([]);
   const [targetModal, setTargetModal] = useState<{
     type: "single" | "double";
+    deckid: string; // deckid of the move maker
     moveMaker: Character;
     move: Move;
     player: "Player 1" | "Player 2";
   } | null>(null);
-  const [tempTargets, setTempTargets] = useState<{ character: Character, player: "Player 1" | "Player 2" }[]>([]);
-  const [glowingCards, setGlowingCards] = useState<{ moveMaker: number | null; targets: number[] }>({ moveMaker: null, targets: [] });
+  // tempTargets now include deckid and targetIndex
+  const [tempTargets, setTempTargets] = useState<TargetDetails[]>([]);
+  const [glowingCards, setGlowingCards] = useState<{ moveMaker: string | null; targets: string[] }>({ moveMaker: null, targets: [] });
   const [round, setRound] = useState(1);
   const [statEffects, setStatEffects] = useState<StatEffect[]>([]);
 
   // --- New state for swap-selection modal ---
-  // This state holds whether the swap-selection modal ("choose which active slot to swap with") is open
   const [swapSelectorOpen, setSwapSelectorOpen] = useState(false);
-  // pendingSwap stores the bench index and swapPlayer passed from the DeckModal via swapMethod
   const [pendingSwap, setPendingSwap] = useState<{ benchIndex: number; swapPlayer: string } | null>(null);
-  // which active slot (0 or 1) the user selected in the swap-selection modal
   const [selectedActiveIndexForSwap, setSelectedActiveIndexForSwap] = useState<number | null>(null);
-  // pending toast message to avoid calling toast during render
   const [pendingToastMessage, setPendingToastMessage] = useState<string | null>(null);
   // ------------------------------------------------
 
@@ -74,7 +93,6 @@ export default function BattlePage() {
         await audioRef.current?.play();
         setIsMusicPlaying(true);
       } catch (err) {
-        // console.log("Autoplay prevented - waiting for user interaction");
         setIsMusicPlaying(false);
       }
     };
@@ -86,17 +104,13 @@ export default function BattlePage() {
   }, []);
 
   // Close deck modal and open swap selector when pendingSwap is set.
-  // Using useEffect ensures these setState calls run after render (fixes "setState during render" error).
   useEffect(() => {
     if (!pendingSwap) return;
 
     const isPlayer1 = pendingSwap.swapPlayer.toLowerCase().includes("player 1");
-
-    // Close the deck modal first (so it doesn't remain open under the new modal)
     if (isPlayer1) setPlayer1DeckOpen(false);
     else setPlayer2DeckOpen(false);
 
-    // Open swap selector on next tick to avoid UI race with closing modal
     const t = setTimeout(() => setSwapSelectorOpen(true), 0);
     return () => clearTimeout(t);
   }, [pendingSwap]);
@@ -107,7 +121,7 @@ export default function BattlePage() {
     toast(pendingToastMessage, {
       icon: '⚡',
       style: {
-        background: '#333',
+        background: '#111827',
         color: '#fff',
       },
     });
@@ -123,15 +137,13 @@ export default function BattlePage() {
     let updatedPlayer2Deck = [...player2Deck];
     let effectsChanged = false;
 
-    // Process each stat effect
     for (let i = updatedEffects.length - 1; i >= 0; i--) {
       const effect = updatedEffects[i];
 
-      // Apply stat changes if duration is still positive
       if (effect.duration > 0) {
         effect.targets.forEach(target => {
           const targetDeck = target.player === "Player 1" ? updatedPlayer1Deck : updatedPlayer2Deck;
-          const targetIndex = targetDeck.findIndex(c => c.character.id === target.character.id);
+          const targetIndex = targetDeck.findIndex(c => c.deckid === target.deckid);
 
           if (targetIndex !== -1) {
             effect.affectedStats.forEach(statEffect => {
@@ -140,7 +152,7 @@ export default function BattlePage() {
               toast(`${targetDeck[targetIndex].character.name} stat is affected by ${statEffect.stat}`, {
                 icon: '⚡',
                 style: {
-                  background: '#333',
+                  background: '#111827',
                   color: '#fff',
                 },
               });
@@ -149,7 +161,6 @@ export default function BattlePage() {
         });
         effectsChanged = true;
       } else {
-        // Remove expired effects
         updatedEffects.splice(i, 1);
         effectsChanged = true;
       }
@@ -180,85 +191,185 @@ export default function BattlePage() {
   useEffect(() => {
     const storedTeams = localStorage.getItem("battleTeams");
     if (!storedTeams) return;
+  
     const teams = JSON.parse(storedTeams);
-    const allNames = teams.flatMap((team: any) => team.characters.map((char: any) => char.name));
-    if (allNames.length === 0) return;
-
-    fetch(`/api/characterByName?names=${encodeURIComponent(allNames.join(","))}`)
+  
+    const allCharNames = teams.flatMap((team: any) =>
+      team.characters.map((char: any) => char.name)
+    );
+  
+    if (allCharNames.length === 0) return;
+  
+    // First, fetch character details
+    fetch(`/api/characterByName?names=${encodeURIComponent(allCharNames.join(","))}`)
       .then((res) => res.json())
-      .then((data) => {
+      .then((characterData) => {
         const mapDeck = (team: any) =>
           team.characters.map((char: any) => {
-            const fullChar = data.find((c: any) => c.name === char.name);
+            const fullChar = characterData.find((c: any) => c.name === char.name);
             return {
+              deckid: uuidv4(),
+              player: team.player,
               character: { ...fullChar, selectedMoves: char.moves },
               maxHP: fullChar?.stats?.hp || 100,
               currentStats: { ...fullChar?.stats }
             };
           });
+  
         setPlayer1Deck(mapDeck(teams.find((t: any) => t.player === "Player 1")));
         setPlayer2Deck(mapDeck(teams.find((t: any) => t.player === "Player 2")));
+        setTeamsLoaded(true);
+  
+        // 🔹 Gather all unique move names from BOTH teams
+        const allMoveNames = [
+          ...new Set(
+            teams.flatMap((team: any) =>
+              team.characters.flatMap((char: any) => char.moves.map((m: any) => m.name))
+            )
+          )
+        ];
+  
+        // 🔹 Fetch move details once
+        fetch(`/api/moveByName?names=${encodeURIComponent(allMoveNames.join(","))}`)
+          .then((res) => res.json())
+          .then((moveData) => {
+            setAllMoveDetails(moveData);
+          });
       });
   }, []);
+  
 
   const player1Active = player1Deck.slice(0, 2);
   const player1Benched = player1Deck.slice(2);
   const player2Active = player2Deck.slice(0, 2);
   const player2Benched = player2Deck.slice(2);
 
+  // helper
+  const buildFaintMapFromDeck = (deck: any[]) => {
+    const map: { [key: string]: boolean } = {};
+    deck.forEach(c => {
+      map[c.deckid] = !!(c.currentStats?.hp <= 0); // true if hp <= 0, else false
+    });
+    return map;
+  };
+
+  const shallowEqual = (a: { [k: string]: any } = {}, b: { [k: string]: any } = {}) => {
+    const aKeys = Object.keys(a);
+    const bKeys = Object.keys(b);
+    if (aKeys.length !== bKeys.length) return false;
+    return aKeys.every(k => a[k] === b[k]);
+  };
+
+  // init/update when player decks change
+  useEffect(() => {
+    if (!player1Deck || player1Deck.length === 0) return;
+    setFaintedPlayer1(prev => {
+      const next = buildFaintMapFromDeck(player1Deck);
+      return shallowEqual(prev, next) ? prev : next;
+    });
+  }, [player1Deck]);
+
+  useEffect(() => {
+    if (!player2Deck || player2Deck.length === 0) return;
+    setFaintedPlayer2(prev => {
+      const next = buildFaintMapFromDeck(player2Deck);
+      return shallowEqual(prev, next) ? prev : next;
+    });
+  }, [player2Deck]);
+
+  // Build battlefieldCards with activeIndex so we can store/resolve slots
   const battlefieldCards = [
-    ...player1Active.map(c => ({ ...c, player: "Player 1" })),
-    ...player2Active.map(c => ({ ...c, player: "Player 2" }))
+    ...player1Active.map((c, i) => ({ ...c, player: "Player 1" as const, activeIndex: i })),
+    ...player2Active.map((c, i) => ({ ...c, player: "Player 2" as const, activeIndex: i })),
   ];
 
   const handleMoveSelect = async (
+    deckid: string,
     player: "Player 1" | "Player 2",
     character: Character,
     hp: number,
     move: Move | null
   ) => {
-    setSelectedMoves((prev) => prev.filter((m) => !(m.player === player && m.moveMaker.id === character.id)));
+    // remove any prior selection for this card (by deckid)
+    setSelectedMoves((prev) => prev.filter((m) => !(m.player === player && m.deckid === deckid)));
     if (!move) return;
 
-    const fullMove = await fetch(`/api/moveByName?names=${encodeURIComponent(move.name)}`).then((res) => res.json());
+    const moveDetails = allMoveDetails.find((m) => m.name === move.name);
+    console.log(moveDetails)
+    if (!moveDetails) return;
     
-    if (!fullMove || fullMove.length === 0) return;
-    const moveDetails = fullMove[0];
 
     for (const targetType of moveDetails.targetTypes) {
       if (targetType === "self") {
-        const targets = [{ character, player }];
-        addMove(player, character, targets, moveDetails);
+        const charDeck = player === "Player 1" ? player1Active : player2Active;
+        const targetIndex = Math.max(0, charDeck.findIndex((c) => c.deckid === deckid));
+        const targets: TargetDetails[] = [{ deckid, character, player, targetIndex }];
+        addMove(deckid, player, character, targets, moveDetails);
         return;
       }
       if (targetType === "all") {
-        const targets = battlefieldCards
-          .filter((c) => c.character.id !== character.id)
+        const targets: TargetDetails[] = battlefieldCards
+          .filter((c) => c.deckid !== deckid)
           .map((c) => ({
+            deckid: c.deckid,
             character: c.character,
-            player: c.player
+            player: c.player,
+            targetIndex: (c as any).activeIndex as number
           }));
-        addMove(player, character, targets, moveDetails);
+        addMove(deckid, player, character, targets, moveDetails);
         return;
       }
       if (targetType === "single") {
-        setTargetModal({ type: "single", moveMaker: character, move: moveDetails, player });
+        setTargetModal({ type: "single", deckid, moveMaker: character, move: moveDetails, player });
         return;
       }
       if (targetType === "double") {
-        setTargetModal({ type: "double", moveMaker: character, move: moveDetails, player });
+        setTargetModal({ type: "double", deckid, moveMaker: character, move: moveDetails, player });
         return;
       }
     }
   };
 
+  const checkFaint = (target: TargetDetails) => {
+    const isPlayer1 = target.player === "Player 1";
+    const targetDeck = isPlayer1 ? player1Deck : player2Deck;
+    const setFainted = isPlayer1 ? setFaintedPlayer1 : setFaintedPlayer2;
+
+    const targetIndex = targetDeck.findIndex(c => c.deckid === target.deckid);
+    if (targetIndex === -1) return; // not found
+
+    const deckid = targetDeck[targetIndex].deckid;
+    const hp = targetDeck[targetIndex].currentStats.hp;
+
+    if (hp <= 0) {
+      // Update fainted map immutably
+      setFainted(prev => ({
+        ...prev,
+        [deckid]: true
+      }));
+    }
+  };
+
+  useEffect(() => {
+    // don't check until we actually loaded decks
+    if (!teamsLoaded) return;
+
+    if (activePlayer1Count === 0 && activePlayer2Count === 0) {
+      router.push("/winner-page")
+    } else if (activePlayer1Count === 0) {
+      router.push("/winner-page")
+    } else if (activePlayer2Count === 0) {
+      router.push("/winner-page")
+    }
+  }, [activePlayer1Count, activePlayer2Count, teamsLoaded]);
   const addMove = (
+    deckid: string,
     player: "Player 1" | "Player 2",
     moveMaker: Character,
     targets: TargetDetails[],
     move: Move
   ) => {
-    setSelectedMoves((prev) => [...prev, { player, moveMaker, targets, move }]);
+    setSelectedMoves((prev) => [...prev, { deckid, player, moveMaker, targets, move }]);
     setTargetModal(null);
     setTempTargets([]);
   };
@@ -268,6 +379,7 @@ export default function BattlePage() {
     const required = targetModal.type === "single" ? 1 : 2;
     if (tempTargets.length !== required) return;
     addMove(
+      targetModal.deckid,
       targetModal.player,
       targetModal.moveMaker,
       tempTargets,
@@ -275,13 +387,15 @@ export default function BattlePage() {
     );
   };
 
+  // toggleTempTarget now captures the activeIndex so we can resolve slot later
   const toggleTempTarget = (card: any) => {
     setTempTargets((prev) => {
-      if (prev.find((t) => t.character.id === card.character.id && t.player === card.player)) {
-        return prev.filter((t) => !(t.character.id === card.character.id && t.player === card.player));
+      const found = prev.find((t) => t.player === card.player && t.targetIndex === card.activeIndex && t.deckid === card.deckid);
+      if (found) {
+        return prev.filter((t) => !(t.player === card.player && t.targetIndex === card.activeIndex && t.deckid === card.deckid));
       } else {
-        if (targetModal?.type === "single") return [{ character: card.character, player: card.player }];
-        if (targetModal?.type === "double" && prev.length < 2) return [...prev, { character: card.character, player: card.player }];
+        if (targetModal?.type === "single") return [{ deckid: card.deckid, character: card.character, player: card.player, targetIndex: card.activeIndex }];
+        if (targetModal?.type === "double" && prev.length < 2) return [...prev, { deckid: card.deckid, character: card.character, player: card.player, targetIndex: card.activeIndex }];
         return prev;
       }
     });
@@ -289,7 +403,7 @@ export default function BattlePage() {
 
   const currentPlayerActive = turn === "Player 1" ? player1Active : player2Active;
   const currentPlayerSelections = selectedMoves.filter((m) => m.player === turn);
-  const canConfirm = currentPlayerSelections.length === currentPlayerActive.length;
+  // const canConfirm = currentPlayerSelections.length === currentPlayerActive.length;
 
   const didHit = (accuracy: number) => Math.random() * 100 < accuracy;
 
@@ -309,7 +423,7 @@ export default function BattlePage() {
 
     for (const move of moves) {
       const deck = move.player === "Player 1" ? decks.player1 : decks.player2;
-      const card = deck.find(c => c.character.id === move.moveMaker.id);
+      const card = deck.find(c => c.deckid === move.deckid);
       const currentSpeed = card?.currentStats?.speed || 0;
 
       if (currentSpeed > fastestSpeed) {
@@ -321,23 +435,23 @@ export default function BattlePage() {
   };
 
   const getPartyMember = (
-    move: SelectedMove, 
+    move: SelectedMove,
     decks: { player1: any[], player2: any[] }
   ): PartyMember | null => {
     try {
       const deck = move.player === "Player 1" ? decks.player1 : decks.player2;
-      
-      // Find first party member who isn't the move maker
-      const partyMember = deck.find(c => c.character.id !== move.moveMaker.id);
-      
+
+      // choose the other active card by deckid difference
+      const partyMember = deck.find(c => c.deckid !== move.deckid);
+
       if (!partyMember) {
         console.warn("No party member found in deck");
         return null;
       }
-  
+
       return {
         character: partyMember.character,
-        player: move.player // Same player's deck
+        player: move.player
       };
     } catch (error) {
       console.error("Error finding party member:", error);
@@ -346,11 +460,7 @@ export default function BattlePage() {
   };
 
   // Swap method: opens a modal that asks which active card to swap with.
-  // DeckModal calls swapMethod(benchIndex, swapPlayer). We store that pending request
-  // and render a small modal with the player's active cards so user can pick which active slot to swap.
   const swapMethod = (benchIndex: number, swapPlayer: string): void => {
-    // store pending swap but DO NOT call other setState that might run during render of other components
-    // this avoids calling setState during render. useEffect (watching pendingSwap) will close deck modal and open selector.
     setPendingSwap({ benchIndex, swapPlayer });
     setSelectedActiveIndexForSwap(null);
   };
@@ -362,13 +472,11 @@ export default function BattlePage() {
     const isPlayer1 = swapPlayer.toLowerCase().includes("player 1");
 
     if (isPlayer1) {
-      // compute using current state (avoid side-effects inside setState updater)
       const prev = player1Deck;
       const active = prev.slice(0, 2);
       const benched = prev.slice(2);
 
       if (benched.length === 0) {
-        // nothing to swap
         setSwapSelectorOpen(false);
         setPendingSwap(null);
         setSelectedActiveIndexForSwap(null);
@@ -391,10 +499,8 @@ export default function BattlePage() {
 
       setPlayer1Deck(newDeck);
 
-      // Queue toast to run after render
       setPendingToastMessage(`${benchCard.character.name} swapped into active!`);
 
-      // close swap selector after swap
       setSwapSelectorOpen(false);
       setPendingSwap(null);
       setSelectedActiveIndexForSwap(null);
@@ -426,10 +532,8 @@ export default function BattlePage() {
 
       setPlayer2Deck(newDeck);
 
-      // Queue toast to run after render
       setPendingToastMessage(`${benchCard.character.name} swapped into active!`);
 
-      // close swap selector after swap
       setSwapSelectorOpen(false);
       setPendingSwap(null);
       setSelectedActiveIndexForSwap(null);
@@ -443,26 +547,41 @@ export default function BattlePage() {
   };
 
   const processDamageMoves = async (damageMove: SelectedMove, updatedPlayer1Deck: any[], updatedPlayer2Deck: any[]) => {
-
     const damage = damageMove.move.power || 0;
 
-    damageMove.targets.forEach((target) => {
+    for (const target of damageMove.targets) {
       const targetDeck = target.player === "Player 1" ? updatedPlayer1Deck : updatedPlayer2Deck;
-      const targetIndex = targetDeck.findIndex(c => c.character.id === target.character.id);
 
-      if (targetIndex !== -1) {
-        const currentHP = targetDeck[targetIndex].currentStats.hp;
+      // Prefer resolving by stored slot index (targetIndex = active slot (0..)).
+      const activeCount = Math.min(2, targetDeck.length);
+      let deckIndex: number = -1;
+
+      if (typeof target.targetIndex === "number" && target.targetIndex >= 0 && target.targetIndex < activeCount) {
+        // resolve to whoever currently occupies that active slot
+        deckIndex = target.targetIndex;
+      } else {
+        // fallback: try find by deckid (targeting the card specifically)
+        deckIndex = targetDeck.findIndex(c => c.deckid === target.deckid);
+      }
+
+      // ultimate fallback: find by character id
+      if (deckIndex === -1) {
+        deckIndex = targetDeck.findIndex(c => c.character.id === target.character.id);
+      }
+
+      if (deckIndex !== -1 && targetDeck[deckIndex]) {
+        const currentHP = targetDeck[deckIndex].currentStats.hp;
         const newHP = Math.max(0, currentHP - damage);
 
-        targetDeck[targetIndex] = {
-          ...targetDeck[targetIndex],
+        targetDeck[deckIndex] = {
+          ...targetDeck[deckIndex],
           currentStats: {
-            ...targetDeck[targetIndex].currentStats,
+            ...targetDeck[deckIndex].currentStats,
             hp: newHP
           },
         };
       }
-    });
+    }
   };
 
   const processSupportMoves = (
@@ -470,41 +589,53 @@ export default function BattlePage() {
     affectedStats: { stat: string; amount: number }[] // Explicit parameter
   ) => {
     if (!affectedStats || !Array.isArray(affectedStats)) return;
-  
+
     const newEffect: StatEffect = {
       id: uuidv4(),
       moveDetails: supportMove.move,
-      affectedStats: affectedStats, // Use the passed parameter
+      affectedStats: affectedStats,
       duration: supportMove.move.duration,
       targets: supportMove.targets
     };
-  
+
     setStatEffects(prev => [...prev, newEffect]);
   };
 
   const processHealMoves = (healMove: SelectedMove, updatedPlayer1Deck: any[], updatedPlayer2Deck: any[]) => {
     const healing = healMove.move.healamount || 0;
 
-    healMove.targets.forEach((target) => {
+    for (const target of healMove.targets) {
       const targetDeck = target.player === "Player 1" ? updatedPlayer1Deck : updatedPlayer2Deck;
-      const targetIndex = targetDeck.findIndex(c => c.character.id === target.character.id);
-      if (targetIndex !== -1) {
-        const currentHP = targetDeck[targetIndex].currentStats.hp;
-        const maxHP = targetDeck[targetIndex].maxHP || 100;
+
+      const activeCount = Math.min(2, targetDeck.length);
+      let deckIndex: number = -1;
+      if (typeof target.targetIndex === "number" && target.targetIndex >= 0 && target.targetIndex < activeCount) {
+        deckIndex = target.targetIndex;
+      } else {
+        deckIndex = targetDeck.findIndex(c => c.deckid === target.deckid);
+      }
+
+      if (deckIndex === -1) {
+        deckIndex = targetDeck.findIndex(c => c.character.id === target.character.id);
+      }
+
+      if (deckIndex !== -1 && targetDeck[deckIndex]) {
+        const currentHP = targetDeck[deckIndex].currentStats.hp;
+        const maxHP = targetDeck[deckIndex].maxHP || 100;
         const newHP = Math.min(maxHP, currentHP + healing);
 
-        targetDeck[targetIndex] = {
-          ...targetDeck[targetIndex],
+        targetDeck[deckIndex] = {
+          ...targetDeck[deckIndex],
           currentStats: {
-            ...targetDeck[targetIndex].currentStats,
+            ...targetDeck[deckIndex].currentStats,
             hp: newHP
           },
         };
       }
-    });
+    }
   };
 
-  const processTargetMoves = async ( targetMove: SelectedMove, updatedPlayer1Deck: any[], updatedPlayer2Deck: any[]) => {
+  const processTargetMoves = async (targetMove: SelectedMove, updatedPlayer1Deck: any[], updatedPlayer2Deck: any[]) => {
     const roles = targetMove.move.roles || [];
     for (const role of roles) {
       if (role === "damage") {
@@ -513,42 +644,42 @@ export default function BattlePage() {
         processSupportMoves(targetMove, targetMove.move.affectedStats || []);
       } else if (role === "selfheal") {
         const newTargetMove = { ...targetMove };
-        newTargetMove.targets = [{character: targetMove.moveMaker, player: targetMove.player}];
+        newTargetMove.targets = [{ deckid: targetMove.deckid, character: targetMove.moveMaker, player: targetMove.player, targetIndex: 0 }];
         processHealMoves(newTargetMove, updatedPlayer1Deck, updatedPlayer2Deck);
       } else if (role === "healpartymember") {
         const currentDecks = {
           player1: updatedPlayer1Deck,
           player2: updatedPlayer2Deck
         };
-      
-        // Get party member (with proper null checking)
+
         const partyMember = getPartyMember(targetMove, currentDecks);
-        
+
         if (!partyMember) {
           console.warn("No party member found to heal");
-          continue; // Exit if no valid target
+          continue;
         }
-      
-        // Create new target move with the party member as target
+
         const healingMove = {
           ...targetMove,
           targets: [{
+            deckid: (currentDecks as any)[partyMember.player === "Player 1" ? "player1" : "player2"].find((c: any) => c.character.id === partyMember.character.id)?.deckid ?? "",
             character: partyMember.character,
-            player: partyMember.player
+            player: partyMember.player,
+            targetIndex: 1 // best-effort; party member slot resolution will occur in processHealMoves
           }]
         };
-      
-        // Process the healing
+
         processHealMoves(healingMove, updatedPlayer1Deck, updatedPlayer2Deck);
-        
-        // Visual feedback
+
         toast.success(`${targetMove.moveMaker.name} healed ${partyMember.character.name}!`);
       } else if (role === "selfsupport") {
         const selfSupportMove = {
           ...targetMove,
           targets: [{
+            deckid: targetMove.deckid,
             character: targetMove.moveMaker,
-            player: targetMove.player
+            player: targetMove.player,
+            targetIndex: 0
           }]
         };
         processSupportMoves(selfSupportMove, selfSupportMove.move.affectedStats2 || []);
@@ -557,22 +688,24 @@ export default function BattlePage() {
           player1: player1Active,
           player2: player2Active
         };
-      
+
         const partyMember = getPartyMember(targetMove, currentDecks);
-        
+
         if (!partyMember) {
           console.warn("No party member found to heal");
           continue;
         }
-      
+
         const partySupportMove = {
           ...targetMove,
           targets: [{
+            deckid: (partyMember.player === "Player 1" ? player1Active : player2Active).find((c: any) => c.character.id === partyMember.character.id)?.deckid ?? "",
             character: partyMember.character,
-            player: partyMember.player
+            player: partyMember.player,
+            targetIndex: 1
           }]
         };
-      
+
         processSupportMoves(partySupportMove, targetMove.move.affectedStats2 || []);
       }
     }
@@ -583,7 +716,8 @@ export default function BattlePage() {
     let updatedPlayer1Deck = [...player1Deck];
     let updatedPlayer2Deck = [...player2Deck];
 
-    console.log("All moves to execute:", remainingMoves);
+    console.log("All moves to execute:", battlefieldCards);
+    console.log("avtivecards:", player1Active);
 
     await new Promise((res) => setTimeout(res, 1000));
 
@@ -598,21 +732,62 @@ export default function BattlePage() {
 
       remainingMoves = remainingMoves.filter(m =>
         !(m.player === nextMove.player &&
-          m.moveMaker.id === nextMove.moveMaker.id &&
+          m.deckid === nextMove.deckid &&
           m.move.name === nextMove.move.name)
       );
 
-      const { move, moveMaker, targets, player: moveMakerPlayer } = nextMove;
+      const { deckid, move, moveMaker, targets, player: moveMakerPlayer } = nextMove;
+      // check the authoritative local decks updated in this function
+      const makerLocalDeck = moveMakerPlayer === "Player 1" ? updatedPlayer1Deck : updatedPlayer2Deck;
+      const makerIndex = makerLocalDeck.findIndex(c => c.deckid === deckid);
+      
+      // if not found or HP <= 0, skip this action
+      if (makerIndex === -1 || (makerLocalDeck[makerIndex].currentStats?.hp ?? 0) <= 0) {
+        continue;
+      }
+
+      // Resolve targets by slot (targetIndex). If a different character is now at that slot, they are hit.
+      const resolvedTargets: TargetDetails[] = targets.map((target) => {
+        const isP1 = target.player === "Player 1";
+        const activeArr = isP1 ? updatedPlayer1Deck.slice(0, 2) : updatedPlayer2Deck.slice(0, 2);
+        let resolvedSlot = -1;
+
+        if (typeof target.targetIndex === "number" && target.targetIndex >= 0 && target.targetIndex < activeArr.length) {
+          resolvedSlot = target.targetIndex;
+        } else {
+          // fallback: find by deckid in current activeArr
+          resolvedSlot = activeArr.findIndex((c) => c.deckid === target.deckid);
+        }
+
+        // If resolvedSlot is still -1, fallback to searching whole deck
+        if (resolvedSlot === -1) {
+          const wholeDeck = isP1 ? updatedPlayer1Deck : updatedPlayer2Deck;
+          const idx = wholeDeck.findIndex(c => c.deckid === target.deckid);
+          if (idx !== -1) {
+            return { deckid: wholeDeck[idx].deckid, character: wholeDeck[idx].character, player: target.player, targetIndex: idx };
+          } else {
+            // ultimate fallback: keep original target but keep deckid (processDamageMoves will try by deckid)
+            return { ...target };
+          }
+        }
+
+        const wholeDeck = isP1 ? updatedPlayer1Deck : updatedPlayer2Deck;
+        const deckIndex = resolvedSlot;
+        const resolvedCharacter = wholeDeck[deckIndex]?.character ?? target.character;
+        const resolvedDeckid = wholeDeck[deckIndex]?.deckid ?? target.deckid;
+
+        return { deckid: resolvedDeckid, character: resolvedCharacter, player: target.player, targetIndex: deckIndex };
+      });
 
       setGlowingCards({
-        moveMaker: moveMaker.id,
-        targets: targets.map(t => t.character.id)
+        moveMaker: nextMove.deckid,
+        targets: resolvedTargets.map(t => t.deckid)
       });
 
       toast(`${moveMaker.name} used ${move.name}`, {
         icon: '⚡',
         style: {
-          background: '#333',
+          background: '#111827',
           color: '#fff',
         },
       });
@@ -627,13 +802,14 @@ export default function BattlePage() {
         continue;
       }
 
-      // Process move based on categories
+      // Use resolvedTargets in a clone of nextMove so processing uses the slot-resolved targets
+      const moveToProcess: SelectedMove = { ...nextMove, targets: resolvedTargets };
+
       for (const category of move.categories) {
         if (category === "target") {
-          await processTargetMoves(nextMove, updatedPlayer1Deck, updatedPlayer2Deck);
-          break; // Only process the first matching category
+          await processTargetMoves(moveToProcess, updatedPlayer1Deck, updatedPlayer2Deck);
+          break;
         }
-        // Add other category handlers here when needed
       }
 
       setPlayer1Deck([...updatedPlayer1Deck]);
@@ -650,7 +826,6 @@ export default function BattlePage() {
   };
 
   const handleConfirm = () => {
-    if (!canConfirm) return;
     if (turn === "Player 1") {
       setTurn("Player 2");
     } else {
@@ -660,183 +835,312 @@ export default function BattlePage() {
     }
   };
 
-  return (
-    <div className="h-screen bg-gradient-to-b from-gray-900 to-black flex flex-col items-center justify-center p-4">
-      <button
-        className="absolute top-4 right-4 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded-full text-sm flex items-center gap-2"
-        onClick={toggleMusic}
-      >
-        <span>{isMusicPlaying ? "🔊" : "🔇"}</span>
-        {isMusicPlaying ? "Music ON" : "Music OFF"}
-      </button>
-      <Toaster position="top-center" />
-      <h2 className="text-white text-xl mb-4">{turn}'s Turn (Round {round})</h2>
-      <div className="grid grid-rows-[1fr_auto_1fr] grid-cols-3 gap-4 w-full max-w-6xl h-full">
-        {/* Player 2 Deck Button */}
-        <div
-          className="flex items-center justify-center bg-gray-800 text-white rounded-lg cursor-pointer hover:bg-gray-700 transition justify-self-end"
-          style={{ width: "100px", height: "100px" }}
-          onClick={() => setPlayer2DeckOpen(true)}
-        >
-          <span className="text-sm font-bold text-center">Player 2 Deck</span>
+  // ---------- Presentational helpers (pure, do not change state) ----------
+  const renderPlayerPanel = (playerLabel: "Player 1" | "Player 2", active: any[], benched: any[], openDeck: () => void) => {
+    const isCurrent = turn === playerLabel;
+    const borderColor = isCurrent ? "border-yellow-400" : "border-gray-700";
+    return (
+      <div className={`flex flex-col items-center w-full max-w-xs`}>
+        <div className={`w-full flex items-center justify-between bg-gradient-to-r ${playerLabel === "Player 1" ? "from-indigo-900 to-indigo-700" : "from-rose-900 to-rose-700"} p-3 rounded-xl shadow-2xl ring-1 ring-black/60 border ${borderColor}`}>
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-full bg-black/40 ring-1 ring-white/10 flex items-center justify-center overflow-hidden">
+              {/* player avatar placeholder */}
+              <span className="text-sm uppercase font-bold text-white/90">{playerLabel.split(" ")[1]}</span>
+            </div>
+            <div>
+              <div className="text-white font-bold">{playerLabel}</div>
+              <div className="text-xs text-white/70">{isCurrent ? "Active" : "Waiting"}</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="text-xs text-white/80 mr-2">Round {round}</div>
+            <button
+              onClick={openDeck}
+              className="px-3 py-1 bg-white/10 hover:bg-white/20 text-white rounded-md text-sm flex items-center gap-2"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 7h18M3 12h18M3 17h18" /></svg>
+              Deck
+            </button>
+          </div>
         </div>
 
-        {/* Player 2 Active Cards */}
-        <div className="col-span-2 flex justify-center space-x-4">
-          {player2Active.map((card) => (
-            <BattleCard
-              key={getUniqueKey("Player2", card.character.id)}
-              character={card.character}
-              currentHP={card.currentStats.hp}
-              maxHP={card.maxHP}
-              currentStats={card.currentStats}
-              selectedMoves={card.character.selectedMoves}
-              onMoveSelect={(move) => handleMoveSelect("Player 2", card.character, card.currentStats.hp, move)}
-              selectedMove={
-                selectedMoves.find((m) => m.player === "Player 2" && m.moveMaker.id === card.character.id)
-                  ?.move
-              }
-              disabled={turn !== "Player 2"}
-              isGlowing={glowingCards.moveMaker === card.character.id}
-              isTargetGlowing={glowingCards.targets.includes(card.character.id)}
-            />
-          ))}
-        </div>
+        <div className="mt-3 w-full bg-gradient-to-b from-black/40 to-white/2 p-3 rounded-xl border border-white/5 shadow-inner">
+          <div className="flex gap-3 justify-center">
+            {active.length === 0 ? (
+              <div className="text-white/60">No active characters</div>
+            ) : (
+              active.map((card: any) => (
+                <div key={getUniqueKey(`${playerLabel}-active`, card.deckid)} className="w-36">
+                  <div className={`relative rounded-lg overflow-hidden p-1 bg-black/20 border ${glowingCards.moveMaker === card.deckid ? "ring-4 ring-yellow-400/30" : "ring-1 ring-black/50"}`}>
+                    <img src={card.character.image} alt={card.character.name} className="w-full h-28 object-cover rounded-md" />
+                    <div className="mt-2">
+                      <div className="text-sm text-white font-semibold truncate">{card.character.name}</div>
+                      <div className="mt-1 flex items-center justify-between">
+                        <div className="text-xs text-white/70">HP</div>
+                        <div className="text-sm text-white font-bold">{Math.max(0, card.currentStats.hp)}</div>
+                      </div>
+                      <div className="w-full h-2 bg-white/10 rounded-full mt-2">
+                        <div className="h-2 rounded-full bg-gradient-to-r from-green-400 to-emerald-500" style={{ width: `${Math.max(0, (card.currentStats.hp / (card.maxHP || 100)) * 100)}%` }} />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
 
-        {/* VS Banner */}
-        <div className="col-span-3 flex justify-center items-center text-4xl font-bold text-white">VS</div>
-
-        {/* Player 1 Active Cards */}
-        <div className="col-span-2 flex justify-center space-x-4">
-          {player1Active.map((card) => (
-            <BattleCard
-              key={getUniqueKey("Player1", card.character.id)}
-              character={card.character}
-              currentHP={card.currentStats.hp}
-              maxHP={card.maxHP}
-              currentStats={card.currentStats}
-              selectedMoves={card.character.selectedMoves}
-              onMoveSelect={(move) => handleMoveSelect("Player 1", card.character, card.currentStats.hp, move)}
-              selectedMove={
-                selectedMoves.find((m) => m.player === "Player 1" && m.moveMaker.id === card.character.id)
-                  ?.move
-              }
-              disabled={turn !== "Player 1"}
-              isGlowing={glowingCards.moveMaker === card.character.id}
-              isTargetGlowing={glowingCards.targets.includes(card.character.id)}
-            />
-          ))}
-        </div>
-
-        {/* Player 1 Deck Button */}
-        <div
-          className="flex items-center justify-center bg-gray-800 text-white rounded-lg cursor-pointer hover:bg-gray-700 transition justify-self-start"
-          style={{ width: "100px", height: "100px" }}
-          onClick={() => setPlayer1DeckOpen(true)}
-        >
-          <span className="text-sm font-bold text-center">Player 1 Deck</span>
+          {benched.length > 0 && (
+            <div className="mt-3 flex gap-2 overflow-x-auto py-2">
+              {benched.map((b: any, i: number) => (
+                <div key={getUniqueKey(`${playerLabel}-bench`, b.deckid)} className="w-20 flex-shrink-0 text-center">
+                  <img src={b.character.image} alt={b.character.name} className="w-16 h-16 rounded-md object-cover border border-white/5" />
+                  <div className="text-xs text-white/70 mt-1 truncate">{b.character.name}</div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
+    );
+  };
+  // ---------- end helpers ----------
 
-      {canConfirm && (
-        <button
-          className="mt-4 px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500"
-          onClick={handleConfirm}
-        >
-          Confirm Moves
-        </button>
-      )}
+  return (
+    <div className="min-h-screen w-full p-6 bg-gradient-to-b from-neutral-900 via-slate-900 to-black relative overflow-hidden">
+      {/* subtle decorative background shapes */}
+      <div className="pointer-events-none absolute inset-0 -z-10">
+        <div className="absolute -left-20 -top-20 w-96 h-96 rounded-full bg-gradient-to-tr from-indigo-700/30 to-transparent blur-3xl opacity-60" />
+        <div className="absolute -right-20 -bottom-20 w-96 h-96 rounded-full bg-gradient-to-br from-rose-700/25 to-transparent blur-3xl opacity-60" />
+      </div>
 
-      {/* Player 2 Deck Modal */}
-      <DeckModal open={player2DeckOpen} swapMethod={swapMethod} onOpenChange={setPlayer2DeckOpen} title="Player 2 Deck" deck={player2Benched} showSwap />
+      {/* Top header */}
+      <header className="w-full max-w-6xl mx-auto mb-6 flex items-center justify-between gap-4">
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-yellow-400 to-pink-500 flex items-center justify-center shadow-xl">
+              <span className="text-xl font-extrabold">⚔️</span>
+            </div>
+            <div>
+              <h1 className="text-2xl text-white font-extrabold">Anime Clash</h1>
+              <p className="text-sm text-white/70">Multiverse Arena — pick your heroes & duel!</p>
+            </div>
+          </div>
+        </div>
 
-      {/* Player 1 Deck Modal */}
-      <DeckModal
-        open={player1DeckOpen}
-        swapMethod={swapMethod}
-        onOpenChange={setPlayer1DeckOpen}
-        title="Player 1 Deck"
-        deck={player1Benched}
-        showSwap
-      />
+        <div className="flex items-center gap-3">
+          <div className="text-sm text-white/80 mr-2">Turn</div>
+          <div className="px-3 py-2 bg-gradient-to-r from-black/50 to-white/2 rounded-lg border border-white/5">
+            <div className="text-sm text-white font-semibold">{turn}</div>
+            <div className="text-xs text-white/50">Round {round}</div>
+          </div>
 
-      {/* Swap selector modal - appears after DeckModal calls swapMethod(benchIndex, swapPlayer) */}
-      {swapSelectorOpen && pendingSwap && (
-        <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50">
-          <div className="bg-gray-800 p-6 rounded-lg max-w-xl w-full">
-            <h3 className="text-white text-lg mb-4">Choose active card to swap with ({pendingSwap.swapPlayer})</h3>
+          <button
+            onClick={toggleMusic}
+            className="flex items-center gap-2 bg-white/5 hover:bg-white/10 px-3 py-2 rounded-lg text-white"
+            title="Toggle music"
+          >
+            <span className="text-lg">{isMusicPlaying ? "🔊" : "🔇"}</span>
+            <span className="text-sm">{isMusicPlaying ? "Music ON" : "Music OFF"}</span>
+          </button>
+        </div>
+      </header>
 
-            <div className="flex flex-wrap gap-4 mb-4">
-              {(pendingSwap.swapPlayer.toLowerCase().includes("player 1") ? player1Active : player2Active).length === 0 ? (
-                <p className="text-white">No active cards available to swap.</p>
-              ) : (
-                (pendingSwap.swapPlayer.toLowerCase().includes("player 1") ? player1Active : player2Active).map((card, idx) => {
-                  const selected = selectedActiveIndexForSwap === idx;
-                  return (
-                    <div
-                      key={getUniqueKey("swapActive", `${pendingSwap.swapPlayer}-${card.character.id}`)}
-                      className={`p-2 rounded-lg cursor-pointer border ${selected ? "border-yellow-400" : "border-transparent"}`}
-                      onClick={() => setSelectedActiveIndexForSwap(idx)}
-                    >
-                      <img src={card.character.image} alt={card.character.name} className="w-24 h-24 object-cover" />
-                      <p className="text-white text-center mt-1">{card.character.name}</p>
-                    </div>
-                  );
-                })
-              )}
+      {/* Main Arena */}
+      <main className="w-full max-w-6xl mx-auto grid grid-cols-12 gap-6">
+        {/* Left - Player 2 panel (top-left) */}
+        <div className="col-span-3 flex flex-col items-center gap-4">
+          {renderPlayerPanel("Player 2", player2Active, player2Benched, () => setPlayer2DeckOpen(true))}
+        </div>
+
+        {/* Center - Battlefield */}
+        <div className="col-span-6 flex flex-col items-center">
+          <div className="w-full bg-gradient-to-b from-black/60 to-white/2 p-6 rounded-2xl border border-white/5 shadow-2xl">
+            <div className="flex items-center justify-between mb-4">
+              <div className="text-white font-bold text-lg">Battlefield</div>
+              <div className="flex items-center gap-3">
+                <div className="text-xs text-white/60">Active Fighters</div>
+                <div className="text-sm text-white/80 px-3 py-1 rounded bg-black/30">{player1Active.length + player2Active.length}</div>
+              </div>
             </div>
 
-            <div className="flex gap-2 justify-end">
-              <button
-                className="px-4 py-2 bg-green-600 text-white rounded disabled:opacity-50"
-                disabled={selectedActiveIndexForSwap === null}
-                onClick={confirmSwap}
-              >
-                Confirm Swap
-              </button>
-              <button className="px-4 py-2 bg-red-600 text-white rounded" onClick={cancelSwap}>Cancel</button>
+            <div className="w-full bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-black via-slate-900 to-zinc-900 p-6 rounded-xl border border-white/3 relative overflow-hidden">
+              <div className="absolute inset-0 opacity-10 bg-[url('/images/arena-pattern.png')] bg-center bg-cover" />
+              <div className="relative z-10 flex flex-col items-center gap-6">
+                {/* Opponent active (Player2) */}
+                <div className="flex gap-6 justify-center w-full">
+                  {player2Active.length === 0 ? (
+                    <div className="text-white/60">No fighters</div>
+                  ) : player2Active.map((card, idx) => (
+                    <div key={getUniqueKey("Player2", card.deckid)} className={`transform transition duration-300 ${glowingCards.moveMaker === card.deckid ? "scale-105" : ""}`}>
+                      <div className="w-44">
+                        <BattleCard
+                          character={card.character}
+                          currentHP={card.currentStats.hp}
+                          maxHP={card.maxHP}
+                          currentStats={card.currentStats}
+                          selectedMoves={card.character.selectedMoves}
+                          onMoveSelect={(move) => handleMoveSelect(card.deckid, "Player 2", card.character, card.currentStats.hp, move)}
+                          selectedMove={selectedMoves.find((m) => m.player === "Player 2" && m.deckid === card.deckid)?.move}
+                          disabled={turn !== "Player 2" || faintedPlayer2[card.deckid]}
+                          isGlowing={glowingCards.moveMaker === card.deckid}
+                          isTargetGlowing={glowingCards.targets.includes(card.deckid)}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* VS emblem */}
+                <div className="text-5xl text-white font-black tracking-tight drop-shadow-lg">VS</div>
+
+                {/* Player 1 active */}
+                <div className="flex gap-6 justify-center w-full">
+                  {player1Active.length === 0 ? (
+                    <div className="text-white/60">No fighters</div>
+                  ) : player1Active.map((card, idx) => (
+                    <div key={getUniqueKey("Player1", card.deckid)} className={`transform transition duration-300 ${glowingCards.moveMaker === card.deckid ? "scale-105" : ""}`}>
+                      <div className="w-44">
+                        <BattleCard
+                          character={card.character}
+                          currentHP={card.currentStats.hp}
+                          maxHP={card.maxHP}
+                          currentStats={card.currentStats}
+                          selectedMoves={card.character.selectedMoves}
+                          onMoveSelect={(move) => handleMoveSelect(card.deckid, "Player 1", card.character, card.currentStats.hp, move)}
+                          selectedMove={selectedMoves.find((m) => m.player === "Player 1" && m.deckid === card.deckid)?.move}
+                          disabled={turn !== "Player 1" || faintedPlayer1[card.deckid]}
+                          isGlowing={glowingCards.moveMaker === card.deckid}
+                          isTargetGlowing={glowingCards.targets.includes(card.deckid)}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-5 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="bg-gradient-to-r from-purple-600 to-pink-600 px-3 py-1 rounded text-white text-sm font-semibold shadow-md">Arena</div>
+                <div className="text-white/70 text-sm">Choose moves, confirm and watch the clash</div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                {(
+                  <button onClick={handleConfirm} className="px-5 py-2 bg-gradient-to-r from-emerald-500 to-lime-400 text-black font-semibold rounded-lg shadow hover:scale-105 transition transform">
+                    Confirm Moves
+                  </button>
+                )}
+                <div className="text-xs text-white/60">Selected: <span className="text-white font-semibold ml-1">{selectedMoves.length}</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Right - Player 1 panel */}
+        <div className="col-span-3 flex flex-col items-center gap-4">
+          {renderPlayerPanel("Player 1", player1Active, player1Benched, () => setPlayer1DeckOpen(true))}
+        </div>
+      </main>
+
+      {/* Deck Modals (unchanged usage) */}
+      <DeckModal open={player2DeckOpen} swapMethod={swapMethod} onOpenChange={setPlayer2DeckOpen} title="Player 2 Deck" deck={player2Benched} showSwap />
+      <DeckModal open={player1DeckOpen} swapMethod={swapMethod} onOpenChange={setPlayer1DeckOpen} title="Player 1 Deck" deck={player1Benched} showSwap />
+
+      {/* Swap selector modal - stylized */}
+      {swapSelectorOpen && pendingSwap && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="max-w-2xl w-full bg-gradient-to-br from-neutral-800 to-neutral-900 p-6 rounded-2xl border border-white/5 shadow-2xl">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-white text-lg font-bold">Swap Active Slot</h3>
+                <p className="text-sm text-white/70">Select which active character to swap with the benched card.</p>
+              </div>
+              <div className="text-white/60">Source: <span className="font-semibold">{pendingSwap.swapPlayer}</span></div>
+            </div>
+
+            <div className="flex flex-col gap-4">
+              <div className="flex gap-4 justify-center">
+                {(pendingSwap.swapPlayer.toLowerCase().includes("player 1") ? player1Active : player2Active).length === 0 ? (
+                  <div className="text-white/60">No active cards available</div>
+                ) : (
+                  (pendingSwap.swapPlayer.toLowerCase().includes("player 1") ? player1Active : player2Active).map((card, idx) => {
+                    const selected = selectedActiveIndexForSwap === idx;
+                    return (
+                      <div
+                        key={getUniqueKey("swapActive", `${pendingSwap.swapPlayer}-${card.deckid}`)}
+                        onClick={() => setSelectedActiveIndexForSwap(idx)}
+                        className={`cursor-pointer p-3 rounded-xl border ${selected ? "ring-4 ring-yellow-400/40 bg-white/3" : "bg-black/20 border-white/5"} transition`}
+                      >
+                        <img src={card.character.image} alt={card.character.name} className="w-28 h-28 object-cover rounded-md" />
+                        <div className="mt-2 text-sm text-white/90 text-center font-semibold">{card.character.name}</div>
+                        <div className="text-xs text-white/60 text-center mt-1">HP {Math.max(0, card.currentStats.hp)}</div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              <div className="flex items-center justify-end gap-3">
+                <button className="px-4 py-2 bg-red-600 rounded text-white" onClick={cancelSwap}>Cancel</button>
+                <button
+                  className={`px-4 py-2 rounded font-semibold ${selectedActiveIndexForSwap === null ? "bg-white/10 text-white/50 cursor-not-allowed" : "bg-gradient-to-r from-yellow-400 to-orange-400 text-black"}`}
+                  onClick={confirmSwap}
+                  disabled={selectedActiveIndexForSwap === null}
+                >
+                  Confirm Swap
+                </button>
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* Target Selection Modal */}
+      {/* Target selection modal - prettified */}
       {targetModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50">
-          <div className="bg-gray-800 p-6 rounded-lg">
-            <h3 className="text-white text-lg mb-4">
-              Select {targetModal.type === "single" ? "1 Target" : "2 Targets"} for {targetModal.move.name}
-            </h3>
-            <div className="flex space-x-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="max-w-3xl w-full bg-gradient-to-br from-neutral-800 to-neutral-900 p-6 rounded-2xl border border-white/5 shadow-2xl">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-white text-lg font-bold">Select {targetModal.type === "single" ? "1 Target" : "2 Targets"} for <span className="text-yellow-400">{targetModal.move.name}</span></h3>
+              <div className="text-sm text-white/60">Move by <span className="font-semibold text-white">{targetModal.moveMaker.name}</span></div>
+            </div>
+
+            <div className="grid grid-cols-4 gap-4 mb-4">
               {battlefieldCards
-                .filter((c) => c.character.id !== targetModal.moveMaker.id)
+                .filter((c) => c.deckid !== targetModal.deckid)
                 .map((card) => {
                   const selected = tempTargets.find((t) =>
-                    t.character.id === card.character.id && t.player === card.player
+                    t.player === card.player && t.targetIndex === card.activeIndex && t.deckid === card.deckid
                   );
                   return (
                     <div
-                      key={getUniqueKey("Target", `${card.player}-${card.character.id}`)}
-                      className={`p-2 rounded-lg cursor-pointer border ${selected ? "border-yellow-400" : "border-transparent"
-                        }`}
+                      key={getUniqueKey("Target", `${card.player}-${card.deckid}`)}
+                      className={`p-3 rounded-lg cursor-pointer border ${selected ? "ring-4 ring-yellow-400/30 bg-white/2" : "bg-black/20 border-white/5"} flex flex-col items-center`}
                       onClick={() => toggleTempTarget(card)}
                     >
-                      <img src={card.character.image} alt={card.character.name} className="w-24 h-24 object-cover" />
-                      <p className="text-white text-center mt-1">{card.character.name} ({card.player})</p>
+                      <img src={card.character.image} alt={card.character.name} className="w-28 h-28 object-cover rounded-md" />
+                      <div className="mt-2 text-white font-semibold text-sm text-center">{card.character.name}</div>
+                      <div className="text-xs text-white/60 mt-1">{card.player}</div>
                     </div>
                   );
                 })}
             </div>
-            <button
-              className="mt-4 px-4 py-2 bg-blue-600 text-white rounded disabled:opacity-50"
-              disabled={tempTargets.length !== (targetModal.type === "single" ? 1 : 2)}
-              onClick={handleTargetConfirm}
-            >
-              Confirm Target
-            </button>
+
+            <div className="flex items-center justify-end gap-3">
+              <button className="px-4 py-2 bg-red-600 rounded text-white" onClick={() => setTargetModal(null)}>Cancel</button>
+              <button
+                className={`px-4 py-2 rounded ${tempTargets.length !== (targetModal.type === "single" ? 1 : 2) ? "bg-white/10 text-white/50 cursor-not-allowed" : "bg-gradient-to-r from-emerald-400 to-lime-300 text-black font-semibold"}`}
+                disabled={tempTargets.length !== (targetModal.type === "single" ? 1 : 2)}
+                onClick={handleTargetConfirm}
+              >
+                Confirm Target
+              </button>
+            </div>
           </div>
         </div>
       )}
+
+      <Toaster position="top-center" />
     </div>
   );
 }
