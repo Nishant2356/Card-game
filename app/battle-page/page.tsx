@@ -1,33 +1,14 @@
 "use client";
+import { TargetDetails, SelectedMove, StatEffect, Deck } from "../types";
 import { useState, useEffect, useRef, useMemo } from "react";
-import BattleCard, { Move, Character } from "@/components/BattleCard/page";
+import BattleCard from "@/components/BattleCard/page";
+import { Move, Character } from "../types";
 import DeckModal from "../modals/DeckModal";
 import toast, { Toaster } from "react-hot-toast";
 import { v4 as uuidv4 } from 'uuid';
 import { useRouter } from "next/navigation";
-
-type TargetDetails = {
-  deckid: string;
-  character: Character;
-  player: "Player 1" | "Player 2";
-  targetIndex: number; // index of the active slot at selection time (0..)
-};
-
-type SelectedMove = {
-  deckid: string; // deckid of the move maker card
-  player: "Player 1" | "Player 2";
-  moveMaker: Character;
-  targets: TargetDetails[];
-  move: Move;
-};
-
-type StatEffect = {
-  id: string;
-  moveDetails: Move;
-  affectedStats: { stat: string; amount: number }[];
-  duration: number;
-  targets: TargetDetails[];
-};
+import TargetSelectionModal from "../modals/TargetSelectionModal";
+import SwapSelectorModal from "../modals/SwapSelectorModal";
 
 interface PartyMember {
   character: Character;
@@ -39,12 +20,12 @@ export default function BattlePage() {
   const [isMusicPlaying, setIsMusicPlaying] = useState(false);
   const [player1DeckOpen, setPlayer1DeckOpen] = useState(false);
   const [player2DeckOpen, setPlayer2DeckOpen] = useState(false);
-  const [player1Deck, setPlayer1Deck] = useState<any[]>([]);
-  const [player2Deck, setPlayer2Deck] = useState<any[]>([]);
+  const [player1Deck, setPlayer1Deck] = useState<Deck[]>([]);
+  const [player2Deck, setPlayer2Deck] = useState<Deck[]>([]);
   const [faintedPlayer1, setFaintedPlayer1] = useState<{ [key: string]: boolean }>({});
   const [faintedPlayer2, setFaintedPlayer2] = useState<{ [key: string]: boolean }>({});
   const [teamsLoaded, setTeamsLoaded] = useState(false);
-  const [allMoveDetails, setAllMoveDetails] = useState<any[]>([]);
+  const [allMoveDetails, setAllMoveDetails] = useState<Move[]>([]);
 
 
   const router = useRouter();
@@ -131,49 +112,63 @@ export default function BattlePage() {
   // Handle stat effects at the end of each round
   useEffect(() => {
     if (selectedMoves.length > 0 || turn === "Player 2") return;
-
-    const updatedEffects = [...statEffects];
-    let updatedPlayer1Deck = [...player1Deck];
-    let updatedPlayer2Deck = [...player2Deck];
-    let effectsChanged = false;
-
-    for (let i = updatedEffects.length - 1; i >= 0; i--) {
-      const effect = updatedEffects[i];
-
-      if (effect.duration > 0) {
-        effect.targets.forEach(target => {
-          const targetDeck = target.player === "Player 1" ? updatedPlayer1Deck : updatedPlayer2Deck;
-          const targetIndex = targetDeck.findIndex(c => c.deckid === target.deckid);
-
-          if (targetIndex !== -1) {
-            effect.affectedStats.forEach(statEffect => {
-              const currentValue = targetDeck[targetIndex].currentStats[statEffect.stat] || 0;
-              targetDeck[targetIndex].currentStats[statEffect.stat] = currentValue + statEffect.amount;
-              toast(`${targetDeck[targetIndex].character.name} stat is affected by ${statEffect.stat}`, {
-                icon: '⚡',
-                style: {
-                  background: '#111827',
-                  color: '#fff',
-                },
-              });
-            });
+  
+    const runEffects = async () => {
+      const updatedEffects = [...statEffects];
+      let updatedPlayer1Deck = [...player1Deck];
+      let updatedPlayer2Deck = [...player2Deck];
+      let effectsChanged = false;
+  
+      for (let i = updatedEffects.length - 1; i >= 0; i--) {
+        const effect = updatedEffects[i];
+  
+        if (effect.duration > 0) {
+          for (const target of effect.targets) {
+            const targetDeck =
+              target.player === "Player 1" ? updatedPlayer1Deck : updatedPlayer2Deck;
+            const targetIndex = targetDeck.findIndex(c => c.deckid === target.deckid);
+        
+            if (targetIndex !== -1) {
+              for (const statEffect of effect.affectedStats) {
+                const currentValue =
+                  targetDeck[targetIndex].currentStats[statEffect.stat] || 0;
+                targetDeck[targetIndex].currentStats[statEffect.stat] =
+                  currentValue + statEffect.amount;
+        
+                toast(
+                  `${targetDeck[targetIndex].character.name} stat is affected by ${statEffect.stat}`,
+                  {
+                    icon: "⚡",
+                    style: {
+                      background: "#111827",
+                      color: "#fff",
+                    },
+                  }
+                );
+        
+                // wait 1 second before applying the next stat
+                await new Promise(res => setTimeout(res, 1000));
+              }
+            }
           }
-        });
-        effectsChanged = true;
-      } else {
-        updatedEffects.splice(i, 1);
-        effectsChanged = true;
+          effectsChanged = true;
+        } else {
+          updatedEffects.splice(i, 1);
+          effectsChanged = true;
+        }
+        effect.duration--;
       }
-      effect.duration--;
-    }
-
-    if (effectsChanged) {
-      setPlayer1Deck(updatedPlayer1Deck);
-      setPlayer2Deck(updatedPlayer2Deck);
-      setStatEffects(updatedEffects);
-    }
-
+  
+      if (effectsChanged) {
+        setPlayer1Deck(updatedPlayer1Deck);
+        setPlayer2Deck(updatedPlayer2Deck);
+        setStatEffects(updatedEffects);
+      }
+    };
+  
+    runEffects();
   }, [round]);
+  
 
   const toggleMusic = () => {
     if (!audioRef.current) return;
@@ -191,15 +186,15 @@ export default function BattlePage() {
   useEffect(() => {
     const storedTeams = localStorage.getItem("battleTeams");
     if (!storedTeams) return;
-  
+
     const teams = JSON.parse(storedTeams);
-  
+
     const allCharNames = teams.flatMap((team: any) =>
       team.characters.map((char: any) => char.name)
     );
-  
+
     if (allCharNames.length === 0) return;
-  
+
     // First, fetch character details
     fetch(`/api/characterByName?names=${encodeURIComponent(allCharNames.join(","))}`)
       .then((res) => res.json())
@@ -215,11 +210,11 @@ export default function BattlePage() {
               currentStats: { ...fullChar?.stats }
             };
           });
-  
+
         setPlayer1Deck(mapDeck(teams.find((t: any) => t.player === "Player 1")));
         setPlayer2Deck(mapDeck(teams.find((t: any) => t.player === "Player 2")));
         setTeamsLoaded(true);
-  
+
         // 🔹 Gather all unique move names from BOTH teams
         const allMoveNames = [
           ...new Set(
@@ -228,7 +223,7 @@ export default function BattlePage() {
             )
           )
         ];
-  
+
         // 🔹 Fetch move details once
         fetch(`/api/moveByName?names=${encodeURIComponent(allMoveNames.join(","))}`)
           .then((res) => res.json())
@@ -237,7 +232,7 @@ export default function BattlePage() {
           });
       });
   }, []);
-  
+
 
   const player1Active = player1Deck.slice(0, 2);
   const player1Benched = player1Deck.slice(2);
@@ -245,7 +240,7 @@ export default function BattlePage() {
   const player2Benched = player2Deck.slice(2);
 
   // helper
-  const buildFaintMapFromDeck = (deck: any[]) => {
+  const buildFaintMapFromDeck = (deck: Deck[]) => {
     const map: { [key: string]: boolean } = {};
     deck.forEach(c => {
       map[c.deckid] = !!(c.currentStats?.hp <= 0); // true if hp <= 0, else false
@@ -295,9 +290,8 @@ export default function BattlePage() {
     if (!move) return;
 
     const moveDetails = allMoveDetails.find((m) => m.name === move.name);
-    console.log(moveDetails)
     if (!moveDetails) return;
-    
+
 
     for (const targetType of moveDetails.targetTypes) {
       if (targetType === "self") {
@@ -546,7 +540,7 @@ export default function BattlePage() {
     setSelectedActiveIndexForSwap(null);
   };
 
-  const processDamageMoves = async (damageMove: SelectedMove, updatedPlayer1Deck: any[], updatedPlayer2Deck: any[]) => {
+  const processDamageMoves = async (damageMove: SelectedMove, updatedPlayer1Deck: Deck[], updatedPlayer2Deck: Deck[]) => {
     const damage = damageMove.move.power || 0;
 
     for (const target of damageMove.targets) {
@@ -601,7 +595,7 @@ export default function BattlePage() {
     setStatEffects(prev => [...prev, newEffect]);
   };
 
-  const processHealMoves = (healMove: SelectedMove, updatedPlayer1Deck: any[], updatedPlayer2Deck: any[]) => {
+  const processHealMoves = (healMove: SelectedMove, updatedPlayer1Deck: Deck[], updatedPlayer2Deck: Deck[]) => {
     const healing = healMove.move.healamount || 0;
 
     for (const target of healMove.targets) {
@@ -635,7 +629,7 @@ export default function BattlePage() {
     }
   };
 
-  const processTargetMoves = async (targetMove: SelectedMove, updatedPlayer1Deck: any[], updatedPlayer2Deck: any[]) => {
+  const processTargetMoves = async (targetMove: SelectedMove, updatedPlayer1Deck: Deck[], updatedPlayer2Deck: Deck[]) => {
     const roles = targetMove.move.roles || [];
     for (const role of roles) {
       if (role === "damage") {
@@ -716,9 +710,6 @@ export default function BattlePage() {
     let updatedPlayer1Deck = [...player1Deck];
     let updatedPlayer2Deck = [...player2Deck];
 
-    console.log("All moves to execute:", battlefieldCards);
-    console.log("avtivecards:", player1Active);
-
     await new Promise((res) => setTimeout(res, 1000));
 
     while (remainingMoves.length > 0) {
@@ -740,7 +731,7 @@ export default function BattlePage() {
       // check the authoritative local decks updated in this function
       const makerLocalDeck = moveMakerPlayer === "Player 1" ? updatedPlayer1Deck : updatedPlayer2Deck;
       const makerIndex = makerLocalDeck.findIndex(c => c.deckid === deckid);
-      
+
       // if not found or HP <= 0, skip this action
       if (makerIndex === -1 || (makerLocalDeck[makerIndex].currentStats?.hp ?? 0) <= 0) {
         continue;
@@ -836,7 +827,7 @@ export default function BattlePage() {
   };
 
   // ---------- Presentational helpers (pure, do not change state) ----------
-  const renderPlayerPanel = (playerLabel: "Player 1" | "Player 2", active: any[], benched: any[], openDeck: () => void) => {
+  const renderPlayerPanel = (playerLabel: "Player 1" | "Player 2", active: Deck[], benched: Deck[], openDeck: () => void) => {
     const isCurrent = turn === playerLabel;
     const borderColor = isCurrent ? "border-yellow-400" : "border-gray-700";
     return (
@@ -1047,99 +1038,27 @@ export default function BattlePage() {
       <DeckModal open={player2DeckOpen} swapMethod={swapMethod} onOpenChange={setPlayer2DeckOpen} title="Player 2 Deck" deck={player2Benched} showSwap />
       <DeckModal open={player1DeckOpen} swapMethod={swapMethod} onOpenChange={setPlayer1DeckOpen} title="Player 1 Deck" deck={player1Benched} showSwap />
 
-      {/* Swap selector modal - stylized */}
-      {swapSelectorOpen && pendingSwap && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-          <div className="max-w-2xl w-full bg-gradient-to-br from-neutral-800 to-neutral-900 p-6 rounded-2xl border border-white/5 shadow-2xl">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h3 className="text-white text-lg font-bold">Swap Active Slot</h3>
-                <p className="text-sm text-white/70">Select which active character to swap with the benched card.</p>
-              </div>
-              <div className="text-white/60">Source: <span className="font-semibold">{pendingSwap.swapPlayer}</span></div>
-            </div>
-
-            <div className="flex flex-col gap-4">
-              <div className="flex gap-4 justify-center">
-                {(pendingSwap.swapPlayer.toLowerCase().includes("player 1") ? player1Active : player2Active).length === 0 ? (
-                  <div className="text-white/60">No active cards available</div>
-                ) : (
-                  (pendingSwap.swapPlayer.toLowerCase().includes("player 1") ? player1Active : player2Active).map((card, idx) => {
-                    const selected = selectedActiveIndexForSwap === idx;
-                    return (
-                      <div
-                        key={getUniqueKey("swapActive", `${pendingSwap.swapPlayer}-${card.deckid}`)}
-                        onClick={() => setSelectedActiveIndexForSwap(idx)}
-                        className={`cursor-pointer p-3 rounded-xl border ${selected ? "ring-4 ring-yellow-400/40 bg-white/3" : "bg-black/20 border-white/5"} transition`}
-                      >
-                        <img src={card.character.image} alt={card.character.name} className="w-28 h-28 object-cover rounded-md" />
-                        <div className="mt-2 text-sm text-white/90 text-center font-semibold">{card.character.name}</div>
-                        <div className="text-xs text-white/60 text-center mt-1">HP {Math.max(0, card.currentStats.hp)}</div>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-
-              <div className="flex items-center justify-end gap-3">
-                <button className="px-4 py-2 bg-red-600 rounded text-white" onClick={cancelSwap}>Cancel</button>
-                <button
-                  className={`px-4 py-2 rounded font-semibold ${selectedActiveIndexForSwap === null ? "bg-white/10 text-white/50 cursor-not-allowed" : "bg-gradient-to-r from-yellow-400 to-orange-400 text-black"}`}
-                  onClick={confirmSwap}
-                  disabled={selectedActiveIndexForSwap === null}
-                >
-                  Confirm Swap
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Target selection modal - prettified */}
-      {targetModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-          <div className="max-w-3xl w-full bg-gradient-to-br from-neutral-800 to-neutral-900 p-6 rounded-2xl border border-white/5 shadow-2xl">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-white text-lg font-bold">Select {targetModal.type === "single" ? "1 Target" : "2 Targets"} for <span className="text-yellow-400">{targetModal.move.name}</span></h3>
-              <div className="text-sm text-white/60">Move by <span className="font-semibold text-white">{targetModal.moveMaker.name}</span></div>
-            </div>
-
-            <div className="grid grid-cols-4 gap-4 mb-4">
-              {battlefieldCards
-                .filter((c) => c.deckid !== targetModal.deckid)
-                .map((card) => {
-                  const selected = tempTargets.find((t) =>
-                    t.player === card.player && t.targetIndex === card.activeIndex && t.deckid === card.deckid
-                  );
-                  return (
-                    <div
-                      key={getUniqueKey("Target", `${card.player}-${card.deckid}`)}
-                      className={`p-3 rounded-lg cursor-pointer border ${selected ? "ring-4 ring-yellow-400/30 bg-white/2" : "bg-black/20 border-white/5"} flex flex-col items-center`}
-                      onClick={() => toggleTempTarget(card)}
-                    >
-                      <img src={card.character.image} alt={card.character.name} className="w-28 h-28 object-cover rounded-md" />
-                      <div className="mt-2 text-white font-semibold text-sm text-center">{card.character.name}</div>
-                      <div className="text-xs text-white/60 mt-1">{card.player}</div>
-                    </div>
-                  );
-                })}
-            </div>
-
-            <div className="flex items-center justify-end gap-3">
-              <button className="px-4 py-2 bg-red-600 rounded text-white" onClick={() => setTargetModal(null)}>Cancel</button>
-              <button
-                className={`px-4 py-2 rounded ${tempTargets.length !== (targetModal.type === "single" ? 1 : 2) ? "bg-white/10 text-white/50 cursor-not-allowed" : "bg-gradient-to-r from-emerald-400 to-lime-300 text-black font-semibold"}`}
-                disabled={tempTargets.length !== (targetModal.type === "single" ? 1 : 2)}
-                onClick={handleTargetConfirm}
-              >
-                Confirm Target
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
+      <SwapSelectorModal
+        swapSelectorOpen={swapSelectorOpen}
+        pendingSwap={pendingSwap}
+        player1Active={player1Active}
+        player2Active={player2Active}
+        getUniqueKey={getUniqueKey}
+        selectedActiveIndexForSwap={selectedActiveIndexForSwap}
+        setSelectedActiveIndexForSwap={setSelectedActiveIndexForSwap}
+        confirmSwap={confirmSwap}
+        cancelSwap={cancelSwap}
+      />
+      
+      <TargetSelectionModal
+        battlefieldCards={battlefieldCards}
+        targetModal={targetModal}
+        setTargetModal={setTargetModal}
+        toggleTempTarget={toggleTempTarget}
+        tempTargets={tempTargets}
+        handleTargetConfirm={handleTargetConfirm}
+        getUniqueKey={getUniqueKey}
+      />
       <Toaster position="top-center" />
     </div>
   );

@@ -1,44 +1,8 @@
 "use client";
+import { Move, Ability, Character } from "@/app/types";
 import { useState } from "react";
 import { AiOutlineInfoCircle } from "react-icons/ai";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-
-export type Move = {
-  id: string;
-  name: string;
-  categories: string[];
-  roles: string[];
-  effects: string[];
-  affectedStats: { stat: string; amount: number }[];
-  affectedStats2: { stat: string; amount: number }[];
-  power: number;
-  accuracy: number;
-  healamount: number
-  targetTypes: string[];
-  duration: number;
-  moveType: "physical" | "special";
-  contact: boolean;
-  exceptionHandler?: string;
-  moveSound?: string;
-  animation?: string;
-  relatedCharacters: string[];
-  description?: string;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type Ability = { name: string; description: string };
-export type Character = {
-  id: number;
-  name: string;
-  title: string;
-  universe: string;
-  image: string;
-  stats: { hp: number; attack: number; defense: number; speed: number };
-  movePool: Move[];
-  abilities: { special: Ability; hidden: Ability };
-  theme: { primaryColor: string; secondaryColor: string; borderColor: string; glowColor: string };
-};
 
 interface BattleCardProps {
   character: Character;
