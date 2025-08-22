@@ -1,5 +1,6 @@
+
 "use client";
-import { TargetDetails, SelectedMove, StatEffect, Deck } from "../types";
+import { TargetDetails, SelectedMove, StatEffect, Deck, GameState } from "../types";
 import { useState, useEffect, useRef, useMemo } from "react";
 import BattleCard from "@/components/BattleCard/page";
 import { Move, Character } from "../types";
@@ -9,9 +10,8 @@ import { v4 as uuidv4 } from 'uuid';
 import { useRouter } from "next/navigation";
 import TargetSelectionModal from "../../components/modals/TargetSelectionModal";
 import SwapSelectorModal from "../../components/modals/SwapSelectorModal";
-import { useSocketContext } from "@/context/SocketContext";
-import PlayerDeck from "@/components/PlayerDeck/PlayerDeck";
 import OpponentCard from "@/components/OpponentCard/page";
+import { useSocketContext } from "@/context/SocketContext";
 
 interface PartyMember {
   character: Character;
@@ -33,10 +33,7 @@ export default function BattlePage() {
   const [processingMoves, setProcessingMoves] = useState(false);
   const [opponentTeamsLoaded, setOpponentTeamsLoaded] = useState(false);
   const [allMoveDetails, setAllMoveDetails] = useState<Move[]>([]);
-  const { playerMap, setPlayerMap, socket } = useSocketContext();
-  const mapPlayer = playerMap?.[socket?.id as string];
-  const isApplyingRemoteRef = useRef(false);
-  const emitTimerRef = useRef<number | null>(null);
+  const [playerData, setPlayerData] = useState<any>({});
 
   const router = useRouter();
 
@@ -59,36 +56,9 @@ export default function BattlePage() {
   const [pendingSwap, setPendingSwap] = useState<{ benchIndex: number; swapPlayer: string } | null>(null);
   const [selectedActiveIndexForSwap, setSelectedActiveIndexForSwap] = useState<number | null>(null);
   const [pendingToastMessage, setPendingToastMessage] = useState<string | null>(null);
+  const { socket, myRoomId, playerMap } = useSocketContext();
 
-  // snapshot refs used for sync
-  const lastRemoteSnapshotRef = useRef<string | null>(null);
-  const lastEmittedSnapshotRef = useRef<string | null>(null);
-
-  // refs to read latest local state inside socket handlers
-  const player1DeckRef = useRef<Deck[]>(player1Deck);
-  const player2DeckRef = useRef<Deck[]>(player2Deck);
-  const faintedPlayer1Ref = useRef<{ [key: string]: boolean }>(faintedPlayer1);
-  const faintedPlayer2Ref = useRef<{ [key: string]: boolean }>(faintedPlayer2);
-  const turnRef = useRef<"Player 1" | "Player 2">(turn);
-  const selectedMovesRef = useRef<SelectedMove[]>(selectedMoves);
-  const glowingCardsRef = useRef<{ moveMaker: string | null; targets: string[] }>(glowingCards);
-  const roundRef = useRef<number>(round);
-  const teamsLoadedRef = useRef<boolean>(teamsLoaded);
-  const processingMovesRef = useRef<boolean>(processingMoves);
   const [canConfirm, setCanConfirm] = useState(true);
-
-
-  // helpers to keep refs up-to-date
-  useEffect(() => { player1DeckRef.current = player1Deck; }, [player1Deck]);
-  useEffect(() => { player2DeckRef.current = player2Deck; }, [player2Deck]);
-  useEffect(() => { faintedPlayer1Ref.current = faintedPlayer1; }, [faintedPlayer1]);
-  useEffect(() => { faintedPlayer2Ref.current = faintedPlayer2; }, [faintedPlayer2]);
-  useEffect(() => { turnRef.current = turn; }, [turn]);
-  useEffect(() => { selectedMovesRef.current = selectedMoves; }, [selectedMoves]);
-  useEffect(() => { glowingCardsRef.current = glowingCards; }, [glowingCards]);
-  useEffect(() => { roundRef.current = round; }, [round]);
-  useEffect(() => { teamsLoadedRef.current = teamsLoaded; }, [teamsLoaded]);
-  useEffect(() => { processingMovesRef.current = processingMoves; }, [processingMoves]);
 
   // Helper for unique keys
   const getUniqueKey = (player: string, id: string | number) => `${player}-${id}`;
@@ -107,223 +77,57 @@ export default function BattlePage() {
       }
     };
     tryAutoplay();
+    console.log(myRoomId)
 
     return () => {
       audioRef.current?.pause();
     };
   }, []);
+  
 
   // --- Toast helper that also broadcasts to other client(s) ---
-  const showAndEmitToast = (message: string) => {
-    // show locally
-    toast(message, {
-      icon: '⚡',
-      style: {
-        background: '#111827',
-        color: '#fff',
-      },
-    });
+// near your top-level helpers
+const showToast = (message: string) => {
+  // local only (still useful)
+  toast(message, {
+    icon: '⚡',
+    style: { background: '#111827', color: '#fff' },
+  });
 
-    // emit so remote clients can show it as well
-    try {
-      if (socket && socket.emit) {
-        socket.emit('showToast', { message, senderId: socket.id });
-      }
-    } catch (err) {
-      // ignore
+  // also notify other clients
+  if (socket && myRoomId) {
+    socket.emit('gameNotification', {
+      roomId: myRoomId,
+      type: 'toast',
+      message,
+      originId: socket.id,
+    });
+  }
+};
+
+useEffect(() => {
+  if (!socket) return;
+
+  const handleGameNotification = (payload: { type: string; message?: string; originId?: string; [k:string]: any }) => {
+    if (!payload) return;
+    // ignore notifications that originated from *this* socket
+    if (payload.originId === socket.id) return;
+
+    if (payload.type === 'toast' && payload.message) {
+      toast(payload.message, {
+        icon: '⚡',
+        style: { background: '#111827', color: '#fff' },
+      });
     }
+
+    // handle other types in the future (e.g. sound, highlight)
   };
 
-  useEffect(() => {
-    if (!socket) return;
-
-    const buildSnapshotString = (overrides: Partial<any> = {}) => {
-      // build a full snapshot string using overrides when provided, else using current refs
-      const snap = {
-        player1Deck: overrides.player1Deck ?? player1DeckRef.current,
-        player2Deck: overrides.player2Deck ?? player2DeckRef.current,
-        faintedPlayer1: overrides.faintedPlayer1 ?? faintedPlayer1Ref.current,
-        faintedPlayer2: overrides.faintedPlayer2 ?? faintedPlayer2Ref.current,
-        turn: overrides.turn ?? turnRef.current,
-        selectedMoves: overrides.selectedMoves ?? selectedMovesRef.current,
-        glowingCards: overrides.glowingCards ?? glowingCardsRef.current,
-        round: overrides.round ?? roundRef.current,
-        teamsLoaded: overrides.teamsLoaded ?? teamsLoadedRef.current,
-        processingMoves: overrides.processingMoves ?? processingMovesRef.current
-      };
-      try {
-        return JSON.stringify(snap);
-      } catch {
-        return null;
-      }
-    };
-
-    const onDeckUpdate = (data: any) => {
-      // record the incoming full decks as "last remote snapshot" (to prevent echo)
-      const snapStr = buildSnapshotString({ player1Deck: data.player1Deck, player2Deck: data.player2Deck });
-      if (snapStr) lastRemoteSnapshotRef.current = snapStr;
-      // apply
-      player1DeckRef.current = data.player1Deck ?? player1DeckRef.current;
-      player2DeckRef.current = data.player2Deck ?? player2DeckRef.current;
-      setPlayer1Deck(data.player1Deck ?? player1DeckRef.current);
-      setPlayer2Deck(data.player2Deck ?? player2DeckRef.current);
-    };
-
-    const onPlayerFainted = (data: any) => {
-      const snapStr = buildSnapshotString({ faintedPlayer1: data.faintedPlayer1, faintedPlayer2: data.faintedPlayer2 });
-      if (snapStr) lastRemoteSnapshotRef.current = snapStr;
-      faintedPlayer1Ref.current = data.faintedPlayer1 ?? faintedPlayer1Ref.current;
-      faintedPlayer2Ref.current = data.faintedPlayer2 ?? faintedPlayer2Ref.current;
-      setFaintedPlayer1(data.faintedPlayer1 ?? faintedPlayer1Ref.current);
-      setFaintedPlayer2(data.faintedPlayer2 ?? faintedPlayer2Ref.current);
-    };
-
-    const onTurnUpdate = (data: any) => {
-      const snapStr = buildSnapshotString({ turn: data.turn });
-      if (snapStr) lastRemoteSnapshotRef.current = snapStr;
-      turnRef.current = data.turn ?? turnRef.current;
-      setTurn(data.turn ?? turnRef.current);
-    };
-
-    const onMovesSelected = (data: any) => {
-      const snapStr = buildSnapshotString({ selectedMoves: data.selectedMoves });
-      if (snapStr) lastRemoteSnapshotRef.current = snapStr;
-      selectedMovesRef.current = data.selectedMoves ?? selectedMovesRef.current;
-      setSelectedMoves(data.selectedMoves ?? selectedMovesRef.current);
-    };
-
-    const onGlowingCards = (data: any) => {
-      const snapStr = buildSnapshotString({ glowingCards: data.glowingCards });
-      if (snapStr) lastRemoteSnapshotRef.current = snapStr;
-      glowingCardsRef.current = data.glowingCards ?? glowingCardsRef.current;
-      setGlowingCards(data.glowingCards ?? glowingCardsRef.current);
-    };
-
-    const onRoundUpdate = (data: any) => {
-      const snapStr = buildSnapshotString({ round: data.round });
-      if (snapStr) lastRemoteSnapshotRef.current = snapStr;
-      roundRef.current = data.round ?? roundRef.current;
-      setRound(data.round ?? roundRef.current);
-    };
-
-    const onOpponentTeamLoaded = (data: any) => {
-      const snapStr = buildSnapshotString({ teamsLoaded: data.teamsLoaded });
-      if (snapStr) lastRemoteSnapshotRef.current = snapStr;
-      teamsLoadedRef.current = data.teamsLoaded ?? teamsLoadedRef.current;
-      setOpponentTeamsLoaded(data.teamsLoaded ?? teamsLoadedRef.current);
-    };
-
-    const onProcessingMoves = (data: any) => {
-      const snapStr = buildSnapshotString({ processingMoves: data.processingMoves });
-      if (snapStr) lastRemoteSnapshotRef.current = snapStr;
-      processingMovesRef.current = data.processingMoves ?? processingMovesRef.current;
-      setProcessingMoves(data.processingMoves ?? processingMovesRef.current);
-    };
-
-    const onShowToast = (data: any) => {
-      try {
-        if (!data || !data.message) return;
-        // ignore toasts that originated from this client (avoid duplicate)
-        if (data.senderId && socket && data.senderId === socket.id) return;
-        setPendingToastMessage(data.message);
-      } catch (err) {
-        // ignore
-      }
-    };
-
-    socket.on('deckUpdate', onDeckUpdate);
-    socket.on('playerFainted', onPlayerFainted);
-    socket.on('turnUpdate', onTurnUpdate);
-    socket.on('movesSelected', onMovesSelected);
-    socket.on('glowingCards', onGlowingCards);
-    socket.on('roundUpdate', onRoundUpdate);
-    socket.on('opponentTeamLoaded', onOpponentTeamLoaded);
-    socket.on('processingMoves', onProcessingMoves);
-    socket.on('showToast', onShowToast);
-
-    return () => {
-      socket.off('deckUpdate', onDeckUpdate);
-      socket.off('playerFainted', onPlayerFainted);
-      socket.off('turnUpdate', onTurnUpdate);
-      socket.off('movesSelected', onMovesSelected);
-      socket.off('glowingCards', onGlowingCards);
-      socket.off('roundUpdate', onRoundUpdate);
-      socket.off('opponentTeamLoaded', onOpponentTeamLoaded);
-      socket.off('processingMoves', onProcessingMoves);
-      socket.off('showToast', onShowToast);
-    };
-  }, [socket]);
-
-  //
-  // --- Centralized / debounced emitter (emits individual events, but only when local snapshot differs
-  //     from last-known remote snapshot). This prevents echo loops and duplicates. ---
-  //
-  useEffect(() => {
-    if (!socket) return;
-
-    // build full snapshot from the local state
-    const snapshot = {
-      player1Deck,
-      player2Deck,
-      faintedPlayer1,
-      faintedPlayer2,
-      turn,
-      selectedMoves,
-      glowingCards,
-      round,
-      teamsLoaded,
-      processingMoves
-    };
-
-    let snapStr: string;
-    try {
-      snapStr = JSON.stringify(snapshot);
-    } catch (e) {
-      // If snapshot cannot be stringified, do nothing
-      return;
-    }
-
-    // If the last remote snapshot matches this exact snapshot, it means the change
-    // came from the server — skip emitting to avoid echo.
-    if (lastRemoteSnapshotRef.current === snapStr) {
-      lastEmittedSnapshotRef.current = snapStr; // mark as "already in sync"
-      return;
-    }
-
-    // If we already emitted this snapshot recently, skip re-emitting.
-    if (lastEmittedSnapshotRef.current === snapStr) {
-      return;
-    }
-
-    // Debounce/batch quick successive local changes
-    if (emitTimerRef.current) {
-      window.clearTimeout(emitTimerRef.current);
-      emitTimerRef.current = null;
-    }
-
-    emitTimerRef.current = window.setTimeout(() => {
-      // Emit the same individual events that your listeners expect.
-      // We send each relevant slice. Server/other clients will update from these events.
-      socket.emit('deckUpdate', { player1Deck, player2Deck });
-      socket.emit('playerFainted', { faintedPlayer1, faintedPlayer2 });
-      socket.emit('turnUpdate', { turn });
-      socket.emit('movesSelected', { selectedMoves });
-      socket.emit('glowingCards', { glowingCards });
-      socket.emit('roundUpdate', { round });
-      socket.emit('opponentTeamLoaded', { teamsLoaded });
-      socket.emit('processingMoves', { processingMoves });
-
-      lastEmittedSnapshotRef.current = snapStr;
-      emitTimerRef.current = null;
-    }, 50);
-
-    return () => {
-      if (emitTimerRef.current) {
-        window.clearTimeout(emitTimerRef.current);
-        emitTimerRef.current = null;
-      }
-    };
-  }, [player1Deck, player2Deck, faintedPlayer1, faintedPlayer2, turn, selectedMoves, glowingCards, round, teamsLoaded, processingMoves, socket]);
+  socket.on('gameNotification', handleGameNotification);
+  return () => {
+    socket.off('gameNotification', handleGameNotification);
+  };
+}, [socket]);
 
 
   // Close deck modal and open swap selector when pendingSwap is set.
@@ -377,8 +181,8 @@ export default function BattlePage() {
                 targetDeck[targetIndex].currentStats[statEffect.stat] =
                   currentValue + statEffect.amount;
 
-                // show and emit toast so both sides see stat changes
-                showAndEmitToast(`${targetDeck[targetIndex].character.name} stat is affected by ${statEffect.stat}`);
+                // show toast so both sides see stat changes
+                showToast(`${targetDeck[targetIndex].character.name} stat is affected by ${statEffect.stat}`);
 
                 // wait 1 second before applying the next stat
                 await new Promise(res => setTimeout(res, 1000));
@@ -397,7 +201,6 @@ export default function BattlePage() {
         setPlayer1Deck(updatedPlayer1Deck);
         setPlayer2Deck(updatedPlayer2Deck);
         setStatEffects(updatedEffects);
-        // central emitter will pick up the change and emit (if needed)
       }
     };
 
@@ -456,8 +259,7 @@ export default function BattlePage() {
             teams.flatMap((team: any) =>
               team.characters.flatMap((char: any) => char.moves.map((m: any) => m.name))
             )
-          )
-        ];
+          )];
 
         // 🔹 Fetch move details once
         fetch(`/api/moveByName?names=${encodeURIComponent(allMoveNames.join(","))}`)
@@ -473,6 +275,8 @@ export default function BattlePage() {
   const player1Benched = player1Deck.slice(2);
   const player2Active = player2Deck.slice(0, 2);
   const player2Benched = player2Deck.slice(2);
+
+  const mapPlayer = playerMap[socket?.id as string];
   let bottomCards = player1Active;
   let topCards = player2Active;
   let bottomPlayer: "Player 1" | "Player 2" = "Player 1";
@@ -526,7 +330,7 @@ export default function BattlePage() {
       const isFainted = Boolean(faintedPlayer1[deckid]); // true => fainted
       if (!isFainted) count++; // not fainted => active
     }
-  
+
     setActivePlayer1Count(count);
   }, [faintedPlayer1]);
 
@@ -537,11 +341,9 @@ export default function BattlePage() {
       const isFainted = Boolean(faintedPlayer2[deckid]); // true => fainted
       if (!isFainted) count++; // not fainted => active
     }
-  
+
     setActivePlayer1Count(count);
   }, [faintedPlayer2]);
-  
-
 
 
   // Build battlefieldCards with activeIndex so we can store/resolve slots
@@ -560,37 +362,8 @@ export default function BattlePage() {
     // remove any prior selection for this card (by deckid)
     setSelectedMoves((prev) => prev.filter((m) => !(m.player === player && m.deckid === deckid)));
 
-    // If this was a deselect (move === null) we want to immediately notify other clients
+    // If this was a deselect (move === null)
     if (!move) {
-      try {
-        if (socket && socket.emit) {
-          // compute what the new selectedMoves array will be (use ref to read latest)
-          const newSelected = selectedMovesRef.current.filter((m) => !(m.player === player && m.deckid === deckid));
-
-          socket.emit('movesSelected', { selectedMoves: newSelected });
-
-          // update lastEmittedSnapshotRef to match this local change and avoid immediate echo-back
-          try {
-            const snap = JSON.stringify({
-              player1Deck: player1DeckRef.current,
-              player2Deck: player2DeckRef.current,
-              faintedPlayer1: faintedPlayer1Ref.current,
-              faintedPlayer2: faintedPlayer2Ref.current,
-              turn: turnRef.current,
-              selectedMoves: newSelected,
-              glowingCards: glowingCardsRef.current,
-              round: roundRef.current,
-              teamsLoaded: teamsLoadedRef.current,
-              processingMoves: processingMovesRef.current
-            });
-            lastEmittedSnapshotRef.current = snap;
-          } catch (err) {
-            // ignore stringify errors
-          }
-        }
-      } catch (err) {
-        // ignore
-      }
       return;
     }
 
@@ -643,10 +416,12 @@ export default function BattlePage() {
 
     if (hp <= 0) {
       // Update fainted map immutably
+      console.log("fainted")
       setFainted(prev => ({
         ...prev,
         [deckid]: true
       }));
+      showToast(`${targetDeck[targetIndex].character.name} fainted!`);
     }
   };
 
@@ -787,7 +562,7 @@ export default function BattlePage() {
       setPlayer1Deck(newDeck);
 
       // use broadcasted toast
-      showAndEmitToast(`${benchCard.character.name} swapped into active!`);
+      showToast(`${benchCard.character.name} swapped into active!`);
 
       setSwapSelectorOpen(false);
       setPendingSwap(null);
@@ -821,7 +596,7 @@ export default function BattlePage() {
       setPlayer2Deck(newDeck);
 
       // use broadcasted toast
-      showAndEmitToast(`${benchCard.character.name} swapped into active!`);
+      showToast(`${benchCard.character.name} swapped into active!`);
 
       setSwapSelectorOpen(false);
       setPendingSwap(null);
@@ -961,7 +736,7 @@ export default function BattlePage() {
         processHealMoves(healingMove, updatedPlayer1Deck, updatedPlayer2Deck);
 
         // notify both sides
-        showAndEmitToast(`${targetMove.moveMaker.name} healed ${partyMember.character.name}!`);
+        showToast(`${targetMove.moveMaker.name} healed ${partyMember.character.name}!`);
       } else if (role === "selfsupport") {
         const selfSupportMove = {
           ...targetMove,
@@ -1003,7 +778,6 @@ export default function BattlePage() {
 
   const processMoves = async (initialMoves: SelectedMove[]) => {
     setProcessingMoves(true);
-    socket?.emit("processingMoves", { processingMoves: true });
     let remainingMoves = [...initialMoves];
     let updatedPlayer1Deck = [...player1Deck];
     let updatedPlayer2Deck = [...player2Deck];
@@ -1075,7 +849,7 @@ export default function BattlePage() {
       });
 
       // notify both sides about the move
-      showAndEmitToast(`${moveMaker.name} used ${move.name}`);
+      showToast(`${moveMaker.name} used ${move.name}`);
 
       if (move.moveSound) {
         await playMoveSound(move.moveSound);
@@ -1107,24 +881,19 @@ export default function BattlePage() {
 
     setRound(prev => prev + 1);
     setProcessingMoves(false);
-    socket?.emit("processingMoves", { processingMoves: false });
   };
 
   useEffect(() => {
-    if (mapPlayer != turn) {
-      setCanConfirm(false);
-    }
-    else {
-      setCanConfirm(true);
-    }
-  }, [turn])
+    setCanConfirm(turn === mapPlayer);
+  }, [turn]);
 
   useEffect(() => {
+    console.log(teamsLoaded, opponentTeamsLoaded)
     if (!teamsLoaded || !opponentTeamsLoaded) return;
 
-    if (activePlayer1Count === 0 && activePlayer2Count === 0) {router.push("/winner-page")} 
-    else if (activePlayer1Count === 0) { router.push("/winner-page") } 
-    else if (activePlayer2Count === 0) { router.push("/winner-page") }
+    if (activePlayer1Count === 0 && activePlayer2Count === 0) { router.push("/winner-page") }
+    else if (activePlayer1Count === 0) { router.push(`/winner-page?winner=${playerData["Player 1"]}`); }
+    else if (activePlayer2Count === 0) { router.push(`/winner-page?winner=${playerData["Player 2"]}`) }
   }, [activePlayer1Count, activePlayer2Count, teamsLoaded, opponentTeamsLoaded]);
 
 
@@ -1137,6 +906,111 @@ export default function BattlePage() {
       setSelectedMoves([]);
     }
   };
+
+  const sharedState = useMemo(() => ({
+    player1Deck,
+    player2Deck,
+    faintedPlayer1,
+    faintedPlayer2,
+    activePlayer1Count,
+    activePlayer2Count,
+    turn,
+    round,
+    selectedMoves,
+    glowingCards,
+    teamsLoaded,
+    processingMoves,
+  }), [
+    player1Deck, player2Deck, faintedPlayer1, faintedPlayer2,
+    activePlayer1Count, activePlayer2Count, turn, round, selectedMoves, glowingCards,
+    teamsLoaded, processingMoves
+  ]);
+
+  const lastEmittedRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!socket || !myRoomId) return;
+  
+    // IMPORTANT: do not include ephemeral UI-only state (selectedMoves) in the shared payload,
+    // or at least filter out local-only parts here.
+    const payload = {
+      player1Deck,
+      player2Deck,
+      faintedPlayer1,
+      faintedPlayer2,
+      activePlayer1Count,
+      activePlayer2Count,
+      turn,
+      round,
+      selectedMoves,
+      glowingCards,
+      teamsLoaded,
+      processingMoves,
+    };
+  
+    const serialized = JSON.stringify(payload);
+    if (serialized === lastEmittedRef.current) return; // nothing changed
+  
+    const timer = setTimeout(() => {
+      socket.emit("syncGameState", { roomId: myRoomId, gameState: payload, originId: socket.id });
+      lastEmittedRef.current = serialized;
+    }, 150); // debounce interval: 100-300ms is typical
+  
+    return () => clearTimeout(timer);
+  }, [
+    socket, myRoomId,
+    player1Deck, player2Deck, faintedPlayer1, faintedPlayer2,
+    activePlayer1Count, activePlayer2Count, turn, round, selectedMoves,
+    glowingCards, teamsLoaded, processingMoves
+  ]);
+
+  useEffect(() => {
+    socket?.emit("getPlayerData", myRoomId);
+  }, [])
+   
+
+  useEffect(() => {
+    if (!socket) return;
+  
+    const handleUpdateGameState = (newState: GameState) => {
+      console.log("Received new game state from server:", newState);
+      // 👉 here you can setOpponentState(newState) or merge into your state
+      setPlayer1Deck(newState.player1Deck)
+      setPlayer2Deck(newState.player2Deck)
+      setFaintedPlayer1(newState.faintedPlayer1)
+      setFaintedPlayer2(newState.faintedPlayer2)
+      setActivePlayer1Count(newState.activePlayer1Count)
+      setActivePlayer2Count(newState.activePlayer2Count)
+      setTurn(newState.turn)
+      setSelectedMoves(newState.selectedMoves)
+      setGlowingCards(newState.glowingCards)
+      setRound(newState.round)
+      setOpponentTeamsLoaded(newState.teamsLoaded)
+      setProcessingMoves(newState.processingMoves)
+    };
+
+    const handleGetPlayerData = (data: any[]) => {
+      const tempPlayerData: any = {};
+    
+      data.forEach((p) => {
+        tempPlayerData[p.player] = p.name;
+      });
+    
+      console.log(tempPlayerData); 
+      // 👉 { Player1: "Nishant", Player2: "Ravi" }
+    
+      setPlayerData(tempPlayerData);
+    };
+    
+  
+    socket.on("updateGameState", handleUpdateGameState);
+    socket.on("getPlayerData", handleGetPlayerData);
+  
+    return () => {
+      socket.off("updateGameState", handleUpdateGameState);
+    };
+  }, [socket]);
+  
 
   // ---------- Presentational helpers (pure, do not change state) ----------
   const renderPlayerPanel = (playerLabel: "Player 1" | "Player 2", active: Deck[], benched: Deck[], openDeck: () => void) => {
@@ -1319,13 +1193,13 @@ export default function BattlePage() {
 
             {canConfirm && !processingMoves && <div className="mt-5 flex items-center justify-between">
 
-                {(
-                  <button onClick={handleConfirm} className="px-5 py-2 bg-gradient-to-r from-emerald-500 to-lime-400 text-black font-semibold rounded-lg shadow hover:scale-105 transition transform">
-                    Confirm Moves
-                  </button>
-                )}
-                <div className="text-xs text-white/60">Selected: <span className="text-white font-semibold ml-1">{selectedMoves.length}</span></div>
-              </div>}
+              {(
+                <button onClick={handleConfirm} className="px-5 py-2 bg-gradient-to-r from-emerald-500 to-lime-400 text-black font-semibold rounded-lg shadow hover:scale-105 transition transform">
+                  Confirm Moves
+                </button>
+              )}
+              <div className="text-xs text-white/60">Selected: <span className="text-white font-semibold ml-1">{selectedMoves.length}</span></div>
+            </div>}
           </div>
         </div>
 
