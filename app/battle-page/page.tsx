@@ -3,12 +3,15 @@ import { TargetDetails, SelectedMove, StatEffect, Deck } from "../types";
 import { useState, useEffect, useRef, useMemo } from "react";
 import BattleCard from "@/components/BattleCard/page";
 import { Move, Character } from "../types";
-import DeckModal from "../modals/DeckModal";
+import DeckModal from "../../components/modals/DeckModal";
 import toast, { Toaster } from "react-hot-toast";
 import { v4 as uuidv4 } from 'uuid';
 import { useRouter } from "next/navigation";
-import TargetSelectionModal from "../modals/TargetSelectionModal";
-import SwapSelectorModal from "../modals/SwapSelectorModal";
+import TargetSelectionModal from "../../components/modals/TargetSelectionModal";
+import SwapSelectorModal from "../../components/modals/SwapSelectorModal";
+import { useSocketContext } from "@/context/SocketContext";
+import PlayerDeck from "@/components/PlayerDeck/PlayerDeck";
+import OpponentCard from "@/components/OpponentCard/page";
 
 interface PartyMember {
   character: Character;
@@ -18,26 +21,24 @@ interface PartyMember {
 export default function BattlePage() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [isMusicPlaying, setIsMusicPlaying] = useState(false);
-  const [player1DeckOpen, setPlayer1DeckOpen] = useState(false);
-  const [player2DeckOpen, setPlayer2DeckOpen] = useState(false);
   const [player1Deck, setPlayer1Deck] = useState<Deck[]>([]);
   const [player2Deck, setPlayer2Deck] = useState<Deck[]>([]);
+  const [player1DeckOpen, setPlayer1DeckOpen] = useState(false);
+  const [player2DeckOpen, setPlayer2DeckOpen] = useState(false);
   const [faintedPlayer1, setFaintedPlayer1] = useState<{ [key: string]: boolean }>({});
   const [faintedPlayer2, setFaintedPlayer2] = useState<{ [key: string]: boolean }>({});
+  const [activePlayer1Count, setActivePlayer1Count] = useState(4);
+  const [activePlayer2Count, setActivePlayer2Count] = useState(4);
   const [teamsLoaded, setTeamsLoaded] = useState(false);
+  const [processingMoves, setProcessingMoves] = useState(false);
+  const [opponentTeamsLoaded, setOpponentTeamsLoaded] = useState(false);
   const [allMoveDetails, setAllMoveDetails] = useState<Move[]>([]);
-
+  const { playerMap, setPlayerMap, socket } = useSocketContext();
+  const mapPlayer = playerMap?.[socket?.id as string];
+  const isApplyingRemoteRef = useRef(false);
+  const emitTimerRef = useRef<number | null>(null);
 
   const router = useRouter();
-  // derive counts from decks
-  const activePlayer1Count = useMemo(
-    () => player1Deck.filter(c => (c.currentStats?.hp ?? 0) > 0).length,
-    [player1Deck]
-  );
-  const activePlayer2Count = useMemo(
-    () => player2Deck.filter(c => (c.currentStats?.hp ?? 0) > 0).length,
-    [player2Deck]
-  );
 
   const [turn, setTurn] = useState<"Player 1" | "Player 2">("Player 1");
   const [selectedMoves, setSelectedMoves] = useState<SelectedMove[]>([]);
@@ -48,7 +49,6 @@ export default function BattlePage() {
     move: Move;
     player: "Player 1" | "Player 2";
   } | null>(null);
-  // tempTargets now include deckid and targetIndex
   const [tempTargets, setTempTargets] = useState<TargetDetails[]>([]);
   const [glowingCards, setGlowingCards] = useState<{ moveMaker: string | null; targets: string[] }>({ moveMaker: null, targets: [] });
   const [round, setRound] = useState(1);
@@ -59,13 +59,42 @@ export default function BattlePage() {
   const [pendingSwap, setPendingSwap] = useState<{ benchIndex: number; swapPlayer: string } | null>(null);
   const [selectedActiveIndexForSwap, setSelectedActiveIndexForSwap] = useState<number | null>(null);
   const [pendingToastMessage, setPendingToastMessage] = useState<string | null>(null);
-  // ------------------------------------------------
+
+  // snapshot refs used for sync
+  const lastRemoteSnapshotRef = useRef<string | null>(null);
+  const lastEmittedSnapshotRef = useRef<string | null>(null);
+
+  // refs to read latest local state inside socket handlers
+  const player1DeckRef = useRef<Deck[]>(player1Deck);
+  const player2DeckRef = useRef<Deck[]>(player2Deck);
+  const faintedPlayer1Ref = useRef<{ [key: string]: boolean }>(faintedPlayer1);
+  const faintedPlayer2Ref = useRef<{ [key: string]: boolean }>(faintedPlayer2);
+  const turnRef = useRef<"Player 1" | "Player 2">(turn);
+  const selectedMovesRef = useRef<SelectedMove[]>(selectedMoves);
+  const glowingCardsRef = useRef<{ moveMaker: string | null; targets: string[] }>(glowingCards);
+  const roundRef = useRef<number>(round);
+  const teamsLoadedRef = useRef<boolean>(teamsLoaded);
+  const processingMovesRef = useRef<boolean>(processingMoves);
+  const [canConfirm, setCanConfirm] = useState(true);
+
+
+  // helpers to keep refs up-to-date
+  useEffect(() => { player1DeckRef.current = player1Deck; }, [player1Deck]);
+  useEffect(() => { player2DeckRef.current = player2Deck; }, [player2Deck]);
+  useEffect(() => { faintedPlayer1Ref.current = faintedPlayer1; }, [faintedPlayer1]);
+  useEffect(() => { faintedPlayer2Ref.current = faintedPlayer2; }, [faintedPlayer2]);
+  useEffect(() => { turnRef.current = turn; }, [turn]);
+  useEffect(() => { selectedMovesRef.current = selectedMoves; }, [selectedMoves]);
+  useEffect(() => { glowingCardsRef.current = glowingCards; }, [glowingCards]);
+  useEffect(() => { roundRef.current = round; }, [round]);
+  useEffect(() => { teamsLoadedRef.current = teamsLoaded; }, [teamsLoaded]);
+  useEffect(() => { processingMovesRef.current = processingMoves; }, [processingMoves]);
 
   // Helper for unique keys
   const getUniqueKey = (player: string, id: string | number) => `${player}-${id}`;
 
   useEffect(() => {
-    audioRef.current = new Audio('/sounds/background/background_music.mp3');
+    audioRef.current = new Audio('/sounds/background/background_musi.mp3');
     audioRef.current.loop = true;
     audioRef.current.volume = 0.5;
 
@@ -83,6 +112,219 @@ export default function BattlePage() {
       audioRef.current?.pause();
     };
   }, []);
+
+  // --- Toast helper that also broadcasts to other client(s) ---
+  const showAndEmitToast = (message: string) => {
+    // show locally
+    toast(message, {
+      icon: '⚡',
+      style: {
+        background: '#111827',
+        color: '#fff',
+      },
+    });
+
+    // emit so remote clients can show it as well
+    try {
+      if (socket && socket.emit) {
+        socket.emit('showToast', { message, senderId: socket.id });
+      }
+    } catch (err) {
+      // ignore
+    }
+  };
+
+  useEffect(() => {
+    if (!socket) return;
+
+    const buildSnapshotString = (overrides: Partial<any> = {}) => {
+      // build a full snapshot string using overrides when provided, else using current refs
+      const snap = {
+        player1Deck: overrides.player1Deck ?? player1DeckRef.current,
+        player2Deck: overrides.player2Deck ?? player2DeckRef.current,
+        faintedPlayer1: overrides.faintedPlayer1 ?? faintedPlayer1Ref.current,
+        faintedPlayer2: overrides.faintedPlayer2 ?? faintedPlayer2Ref.current,
+        turn: overrides.turn ?? turnRef.current,
+        selectedMoves: overrides.selectedMoves ?? selectedMovesRef.current,
+        glowingCards: overrides.glowingCards ?? glowingCardsRef.current,
+        round: overrides.round ?? roundRef.current,
+        teamsLoaded: overrides.teamsLoaded ?? teamsLoadedRef.current,
+        processingMoves: overrides.processingMoves ?? processingMovesRef.current
+      };
+      try {
+        return JSON.stringify(snap);
+      } catch {
+        return null;
+      }
+    };
+
+    const onDeckUpdate = (data: any) => {
+      // record the incoming full decks as "last remote snapshot" (to prevent echo)
+      const snapStr = buildSnapshotString({ player1Deck: data.player1Deck, player2Deck: data.player2Deck });
+      if (snapStr) lastRemoteSnapshotRef.current = snapStr;
+      // apply
+      player1DeckRef.current = data.player1Deck ?? player1DeckRef.current;
+      player2DeckRef.current = data.player2Deck ?? player2DeckRef.current;
+      setPlayer1Deck(data.player1Deck ?? player1DeckRef.current);
+      setPlayer2Deck(data.player2Deck ?? player2DeckRef.current);
+    };
+
+    const onPlayerFainted = (data: any) => {
+      const snapStr = buildSnapshotString({ faintedPlayer1: data.faintedPlayer1, faintedPlayer2: data.faintedPlayer2 });
+      if (snapStr) lastRemoteSnapshotRef.current = snapStr;
+      faintedPlayer1Ref.current = data.faintedPlayer1 ?? faintedPlayer1Ref.current;
+      faintedPlayer2Ref.current = data.faintedPlayer2 ?? faintedPlayer2Ref.current;
+      setFaintedPlayer1(data.faintedPlayer1 ?? faintedPlayer1Ref.current);
+      setFaintedPlayer2(data.faintedPlayer2 ?? faintedPlayer2Ref.current);
+    };
+
+    const onTurnUpdate = (data: any) => {
+      const snapStr = buildSnapshotString({ turn: data.turn });
+      if (snapStr) lastRemoteSnapshotRef.current = snapStr;
+      turnRef.current = data.turn ?? turnRef.current;
+      setTurn(data.turn ?? turnRef.current);
+    };
+
+    const onMovesSelected = (data: any) => {
+      const snapStr = buildSnapshotString({ selectedMoves: data.selectedMoves });
+      if (snapStr) lastRemoteSnapshotRef.current = snapStr;
+      selectedMovesRef.current = data.selectedMoves ?? selectedMovesRef.current;
+      setSelectedMoves(data.selectedMoves ?? selectedMovesRef.current);
+    };
+
+    const onGlowingCards = (data: any) => {
+      const snapStr = buildSnapshotString({ glowingCards: data.glowingCards });
+      if (snapStr) lastRemoteSnapshotRef.current = snapStr;
+      glowingCardsRef.current = data.glowingCards ?? glowingCardsRef.current;
+      setGlowingCards(data.glowingCards ?? glowingCardsRef.current);
+    };
+
+    const onRoundUpdate = (data: any) => {
+      const snapStr = buildSnapshotString({ round: data.round });
+      if (snapStr) lastRemoteSnapshotRef.current = snapStr;
+      roundRef.current = data.round ?? roundRef.current;
+      setRound(data.round ?? roundRef.current);
+    };
+
+    const onOpponentTeamLoaded = (data: any) => {
+      const snapStr = buildSnapshotString({ teamsLoaded: data.teamsLoaded });
+      if (snapStr) lastRemoteSnapshotRef.current = snapStr;
+      teamsLoadedRef.current = data.teamsLoaded ?? teamsLoadedRef.current;
+      setOpponentTeamsLoaded(data.teamsLoaded ?? teamsLoadedRef.current);
+    };
+
+    const onProcessingMoves = (data: any) => {
+      const snapStr = buildSnapshotString({ processingMoves: data.processingMoves });
+      if (snapStr) lastRemoteSnapshotRef.current = snapStr;
+      processingMovesRef.current = data.processingMoves ?? processingMovesRef.current;
+      setProcessingMoves(data.processingMoves ?? processingMovesRef.current);
+    };
+
+    const onShowToast = (data: any) => {
+      try {
+        if (!data || !data.message) return;
+        // ignore toasts that originated from this client (avoid duplicate)
+        if (data.senderId && socket && data.senderId === socket.id) return;
+        setPendingToastMessage(data.message);
+      } catch (err) {
+        // ignore
+      }
+    };
+
+    socket.on('deckUpdate', onDeckUpdate);
+    socket.on('playerFainted', onPlayerFainted);
+    socket.on('turnUpdate', onTurnUpdate);
+    socket.on('movesSelected', onMovesSelected);
+    socket.on('glowingCards', onGlowingCards);
+    socket.on('roundUpdate', onRoundUpdate);
+    socket.on('opponentTeamLoaded', onOpponentTeamLoaded);
+    socket.on('processingMoves', onProcessingMoves);
+    socket.on('showToast', onShowToast);
+
+    return () => {
+      socket.off('deckUpdate', onDeckUpdate);
+      socket.off('playerFainted', onPlayerFainted);
+      socket.off('turnUpdate', onTurnUpdate);
+      socket.off('movesSelected', onMovesSelected);
+      socket.off('glowingCards', onGlowingCards);
+      socket.off('roundUpdate', onRoundUpdate);
+      socket.off('opponentTeamLoaded', onOpponentTeamLoaded);
+      socket.off('processingMoves', onProcessingMoves);
+      socket.off('showToast', onShowToast);
+    };
+  }, [socket]);
+
+  //
+  // --- Centralized / debounced emitter (emits individual events, but only when local snapshot differs
+  //     from last-known remote snapshot). This prevents echo loops and duplicates. ---
+  //
+  useEffect(() => {
+    if (!socket) return;
+
+    // build full snapshot from the local state
+    const snapshot = {
+      player1Deck,
+      player2Deck,
+      faintedPlayer1,
+      faintedPlayer2,
+      turn,
+      selectedMoves,
+      glowingCards,
+      round,
+      teamsLoaded,
+      processingMoves
+    };
+
+    let snapStr: string;
+    try {
+      snapStr = JSON.stringify(snapshot);
+    } catch (e) {
+      // If snapshot cannot be stringified, do nothing
+      return;
+    }
+
+    // If the last remote snapshot matches this exact snapshot, it means the change
+    // came from the server — skip emitting to avoid echo.
+    if (lastRemoteSnapshotRef.current === snapStr) {
+      lastEmittedSnapshotRef.current = snapStr; // mark as "already in sync"
+      return;
+    }
+
+    // If we already emitted this snapshot recently, skip re-emitting.
+    if (lastEmittedSnapshotRef.current === snapStr) {
+      return;
+    }
+
+    // Debounce/batch quick successive local changes
+    if (emitTimerRef.current) {
+      window.clearTimeout(emitTimerRef.current);
+      emitTimerRef.current = null;
+    }
+
+    emitTimerRef.current = window.setTimeout(() => {
+      // Emit the same individual events that your listeners expect.
+      // We send each relevant slice. Server/other clients will update from these events.
+      socket.emit('deckUpdate', { player1Deck, player2Deck });
+      socket.emit('playerFainted', { faintedPlayer1, faintedPlayer2 });
+      socket.emit('turnUpdate', { turn });
+      socket.emit('movesSelected', { selectedMoves });
+      socket.emit('glowingCards', { glowingCards });
+      socket.emit('roundUpdate', { round });
+      socket.emit('opponentTeamLoaded', { teamsLoaded });
+      socket.emit('processingMoves', { processingMoves });
+
+      lastEmittedSnapshotRef.current = snapStr;
+      emitTimerRef.current = null;
+    }, 50);
+
+    return () => {
+      if (emitTimerRef.current) {
+        window.clearTimeout(emitTimerRef.current);
+        emitTimerRef.current = null;
+      }
+    };
+  }, [player1Deck, player2Deck, faintedPlayer1, faintedPlayer2, turn, selectedMoves, glowingCards, round, teamsLoaded, processingMoves, socket]);
+
 
   // Close deck modal and open swap selector when pendingSwap is set.
   useEffect(() => {
@@ -112,40 +354,32 @@ export default function BattlePage() {
   // Handle stat effects at the end of each round
   useEffect(() => {
     if (selectedMoves.length > 0 || turn === "Player 2") return;
-  
+
     const runEffects = async () => {
       const updatedEffects = [...statEffects];
       let updatedPlayer1Deck = [...player1Deck];
       let updatedPlayer2Deck = [...player2Deck];
       let effectsChanged = false;
-  
+
       for (let i = updatedEffects.length - 1; i >= 0; i--) {
         const effect = updatedEffects[i];
-  
+
         if (effect.duration > 0) {
           for (const target of effect.targets) {
             const targetDeck =
               target.player === "Player 1" ? updatedPlayer1Deck : updatedPlayer2Deck;
             const targetIndex = targetDeck.findIndex(c => c.deckid === target.deckid);
-        
+
             if (targetIndex !== -1) {
               for (const statEffect of effect.affectedStats) {
                 const currentValue =
                   targetDeck[targetIndex].currentStats[statEffect.stat] || 0;
                 targetDeck[targetIndex].currentStats[statEffect.stat] =
                   currentValue + statEffect.amount;
-        
-                toast(
-                  `${targetDeck[targetIndex].character.name} stat is affected by ${statEffect.stat}`,
-                  {
-                    icon: "⚡",
-                    style: {
-                      background: "#111827",
-                      color: "#fff",
-                    },
-                  }
-                );
-        
+
+                // show and emit toast so both sides see stat changes
+                showAndEmitToast(`${targetDeck[targetIndex].character.name} stat is affected by ${statEffect.stat}`);
+
                 // wait 1 second before applying the next stat
                 await new Promise(res => setTimeout(res, 1000));
               }
@@ -158,17 +392,18 @@ export default function BattlePage() {
         }
         effect.duration--;
       }
-  
+
       if (effectsChanged) {
         setPlayer1Deck(updatedPlayer1Deck);
         setPlayer2Deck(updatedPlayer2Deck);
         setStatEffects(updatedEffects);
+        // central emitter will pick up the change and emit (if needed)
       }
     };
-  
+
     runEffects();
   }, [round]);
-  
+
 
   const toggleMusic = () => {
     if (!audioRef.current) return;
@@ -238,6 +473,18 @@ export default function BattlePage() {
   const player1Benched = player1Deck.slice(2);
   const player2Active = player2Deck.slice(0, 2);
   const player2Benched = player2Deck.slice(2);
+  let bottomCards = player1Active;
+  let topCards = player2Active;
+  let bottomPlayer: "Player 1" | "Player 2" = "Player 1";
+  let topPlayer: "Player 1" | "Player 2" = "Player 2"
+  if (mapPlayer == "Player 2") {
+    let temp = topCards;
+    topCards = bottomCards;
+    bottomCards = temp
+    let temp2 = topPlayer
+    topPlayer = bottomPlayer
+    bottomPlayer = temp2
+  }
 
   // helper
   const buildFaintMapFromDeck = (deck: Deck[]) => {
@@ -272,6 +519,31 @@ export default function BattlePage() {
     });
   }, [player2Deck]);
 
+  useEffect(() => {
+    let count = 0;
+    for (const deckid in faintedPlayer1) {
+      if (!Object.prototype.hasOwnProperty.call(faintedPlayer1, deckid)) continue;
+      const isFainted = Boolean(faintedPlayer1[deckid]); // true => fainted
+      if (!isFainted) count++; // not fainted => active
+    }
+  
+    setActivePlayer1Count(count);
+  }, [faintedPlayer1]);
+
+  useEffect(() => {
+    let count = 0;
+    for (const deckid in faintedPlayer2) {
+      if (!Object.prototype.hasOwnProperty.call(faintedPlayer2, deckid)) continue;
+      const isFainted = Boolean(faintedPlayer2[deckid]); // true => fainted
+      if (!isFainted) count++; // not fainted => active
+    }
+  
+    setActivePlayer1Count(count);
+  }, [faintedPlayer2]);
+  
+
+
+
   // Build battlefieldCards with activeIndex so we can store/resolve slots
   const battlefieldCards = [
     ...player1Active.map((c, i) => ({ ...c, player: "Player 1" as const, activeIndex: i })),
@@ -287,7 +559,40 @@ export default function BattlePage() {
   ) => {
     // remove any prior selection for this card (by deckid)
     setSelectedMoves((prev) => prev.filter((m) => !(m.player === player && m.deckid === deckid)));
-    if (!move) return;
+
+    // If this was a deselect (move === null) we want to immediately notify other clients
+    if (!move) {
+      try {
+        if (socket && socket.emit) {
+          // compute what the new selectedMoves array will be (use ref to read latest)
+          const newSelected = selectedMovesRef.current.filter((m) => !(m.player === player && m.deckid === deckid));
+
+          socket.emit('movesSelected', { selectedMoves: newSelected });
+
+          // update lastEmittedSnapshotRef to match this local change and avoid immediate echo-back
+          try {
+            const snap = JSON.stringify({
+              player1Deck: player1DeckRef.current,
+              player2Deck: player2DeckRef.current,
+              faintedPlayer1: faintedPlayer1Ref.current,
+              faintedPlayer2: faintedPlayer2Ref.current,
+              turn: turnRef.current,
+              selectedMoves: newSelected,
+              glowingCards: glowingCardsRef.current,
+              round: roundRef.current,
+              teamsLoaded: teamsLoadedRef.current,
+              processingMoves: processingMovesRef.current
+            });
+            lastEmittedSnapshotRef.current = snap;
+          } catch (err) {
+            // ignore stringify errors
+          }
+        }
+      } catch (err) {
+        // ignore
+      }
+      return;
+    }
 
     const moveDetails = allMoveDetails.find((m) => m.name === move.name);
     if (!moveDetails) return;
@@ -328,6 +633,7 @@ export default function BattlePage() {
     const isPlayer1 = target.player === "Player 1";
     const targetDeck = isPlayer1 ? player1Deck : player2Deck;
     const setFainted = isPlayer1 ? setFaintedPlayer1 : setFaintedPlayer2;
+    const setFaintedCount = isPlayer1 ? setActivePlayer1Count : setActivePlayer2Count;
 
     const targetIndex = targetDeck.findIndex(c => c.deckid === target.deckid);
     if (targetIndex === -1) return; // not found
@@ -344,18 +650,6 @@ export default function BattlePage() {
     }
   };
 
-  useEffect(() => {
-    // don't check until we actually loaded decks
-    if (!teamsLoaded) return;
-
-    if (activePlayer1Count === 0 && activePlayer2Count === 0) {
-      router.push("/winner-page")
-    } else if (activePlayer1Count === 0) {
-      router.push("/winner-page")
-    } else if (activePlayer2Count === 0) {
-      router.push("/winner-page")
-    }
-  }, [activePlayer1Count, activePlayer2Count, teamsLoaded]);
   const addMove = (
     deckid: string,
     player: "Player 1" | "Player 2",
@@ -397,7 +691,6 @@ export default function BattlePage() {
 
   const currentPlayerActive = turn === "Player 1" ? player1Active : player2Active;
   const currentPlayerSelections = selectedMoves.filter((m) => m.player === turn);
-  // const canConfirm = currentPlayerSelections.length === currentPlayerActive.length;
 
   const didHit = (accuracy: number) => Math.random() * 100 < accuracy;
 
@@ -493,7 +786,8 @@ export default function BattlePage() {
 
       setPlayer1Deck(newDeck);
 
-      setPendingToastMessage(`${benchCard.character.name} swapped into active!`);
+      // use broadcasted toast
+      showAndEmitToast(`${benchCard.character.name} swapped into active!`);
 
       setSwapSelectorOpen(false);
       setPendingSwap(null);
@@ -526,7 +820,8 @@ export default function BattlePage() {
 
       setPlayer2Deck(newDeck);
 
-      setPendingToastMessage(`${benchCard.character.name} swapped into active!`);
+      // use broadcasted toast
+      showAndEmitToast(`${benchCard.character.name} swapped into active!`);
 
       setSwapSelectorOpen(false);
       setPendingSwap(null);
@@ -665,7 +960,8 @@ export default function BattlePage() {
 
         processHealMoves(healingMove, updatedPlayer1Deck, updatedPlayer2Deck);
 
-        toast.success(`${targetMove.moveMaker.name} healed ${partyMember.character.name}!`);
+        // notify both sides
+        showAndEmitToast(`${targetMove.moveMaker.name} healed ${partyMember.character.name}!`);
       } else if (role === "selfsupport") {
         const selfSupportMove = {
           ...targetMove,
@@ -706,11 +1002,14 @@ export default function BattlePage() {
   };
 
   const processMoves = async (initialMoves: SelectedMove[]) => {
+    setProcessingMoves(true);
+    socket?.emit("processingMoves", { processingMoves: true });
     let remainingMoves = [...initialMoves];
     let updatedPlayer1Deck = [...player1Deck];
     let updatedPlayer2Deck = [...player2Deck];
 
     await new Promise((res) => setTimeout(res, 1000));
+    console.log(processingMoves)
 
     while (remainingMoves.length > 0) {
       const currentDecks = {
@@ -775,13 +1074,8 @@ export default function BattlePage() {
         targets: resolvedTargets.map(t => t.deckid)
       });
 
-      toast(`${moveMaker.name} used ${move.name}`, {
-        icon: '⚡',
-        style: {
-          background: '#111827',
-          color: '#fff',
-        },
-      });
+      // notify both sides about the move
+      showAndEmitToast(`${moveMaker.name} used ${move.name}`);
 
       if (move.moveSound) {
         await playMoveSound(move.moveSound);
@@ -812,9 +1106,27 @@ export default function BattlePage() {
     }
 
     setRound(prev => prev + 1);
-    console.log(player1Deck);
-    console.log(player2Deck);
+    setProcessingMoves(false);
+    socket?.emit("processingMoves", { processingMoves: false });
   };
+
+  useEffect(() => {
+    if (mapPlayer != turn) {
+      setCanConfirm(false);
+    }
+    else {
+      setCanConfirm(true);
+    }
+  }, [turn])
+
+  useEffect(() => {
+    if (!teamsLoaded || !opponentTeamsLoaded) return;
+
+    if (activePlayer1Count === 0 && activePlayer2Count === 0) {router.push("/winner-page")} 
+    else if (activePlayer1Count === 0) { router.push("/winner-page") } 
+    else if (activePlayer2Count === 0) { router.push("/winner-page") }
+  }, [activePlayer1Count, activePlayer2Count, teamsLoaded, opponentTeamsLoaded]);
+
 
   const handleConfirm = () => {
     if (turn === "Player 1") {
@@ -959,20 +1271,15 @@ export default function BattlePage() {
               <div className="relative z-10 flex flex-col items-center gap-6">
                 {/* Opponent active (Player2) */}
                 <div className="flex gap-6 justify-center w-full">
-                  {player2Active.length === 0 ? (
+                  {topCards.length === 0 ? (
                     <div className="text-white/60">No fighters</div>
-                  ) : player2Active.map((card, idx) => (
-                    <div key={getUniqueKey("Player2", card.deckid)} className={`transform transition duration-300 ${glowingCards.moveMaker === card.deckid ? "scale-105" : ""}`}>
+                  ) : topCards.map((card, idx) => (
+                    <div key={getUniqueKey(topPlayer, card.deckid)} className={`transform transition duration-300 ${glowingCards.moveMaker === card.deckid ? "scale-105" : ""}`}>
                       <div className="w-44">
-                        <BattleCard
+                        <OpponentCard
                           character={card.character}
                           currentHP={card.currentStats.hp}
                           maxHP={card.maxHP}
-                          currentStats={card.currentStats}
-                          selectedMoves={card.character.selectedMoves}
-                          onMoveSelect={(move) => handleMoveSelect(card.deckid, "Player 2", card.character, card.currentStats.hp, move)}
-                          selectedMove={selectedMoves.find((m) => m.player === "Player 2" && m.deckid === card.deckid)?.move}
-                          disabled={turn !== "Player 2" || faintedPlayer2[card.deckid]}
                           isGlowing={glowingCards.moveMaker === card.deckid}
                           isTargetGlowing={glowingCards.targets.includes(card.deckid)}
                         />
@@ -984,12 +1291,12 @@ export default function BattlePage() {
                 {/* VS emblem */}
                 <div className="text-5xl text-white font-black tracking-tight drop-shadow-lg">VS</div>
 
-                {/* Player 1 active */}
+                {/* bottom active */}
                 <div className="flex gap-6 justify-center w-full">
-                  {player1Active.length === 0 ? (
+                  {bottomCards.length === 0 ? (
                     <div className="text-white/60">No fighters</div>
-                  ) : player1Active.map((card, idx) => (
-                    <div key={getUniqueKey("Player1", card.deckid)} className={`transform transition duration-300 ${glowingCards.moveMaker === card.deckid ? "scale-105" : ""}`}>
+                  ) : bottomCards.map((card, idx) => (
+                    <div key={getUniqueKey(bottomPlayer, card.deckid)} className={`transform transition duration-300 ${glowingCards.moveMaker === card.deckid ? "scale-105" : ""}`}>
                       <div className="w-44">
                         <BattleCard
                           character={card.character}
@@ -997,9 +1304,9 @@ export default function BattlePage() {
                           maxHP={card.maxHP}
                           currentStats={card.currentStats}
                           selectedMoves={card.character.selectedMoves}
-                          onMoveSelect={(move) => handleMoveSelect(card.deckid, "Player 1", card.character, card.currentStats.hp, move)}
-                          selectedMove={selectedMoves.find((m) => m.player === "Player 1" && m.deckid === card.deckid)?.move}
-                          disabled={turn !== "Player 1" || faintedPlayer1[card.deckid]}
+                          onMoveSelect={(move) => handleMoveSelect(card.deckid, bottomPlayer, card.character, card.currentStats.hp, move)}
+                          selectedMove={selectedMoves.find((m) => m.player === bottomPlayer && m.deckid === card.deckid)?.move}
+                          disabled={turn !== bottomPlayer || (bottomPlayer == "Player 1" ? faintedPlayer1[card.deckid] : faintedPlayer2[card.deckid])}
                           isGlowing={glowingCards.moveMaker === card.deckid}
                           isTargetGlowing={glowingCards.targets.includes(card.deckid)}
                         />
@@ -1010,21 +1317,15 @@ export default function BattlePage() {
               </div>
             </div>
 
-            <div className="mt-5 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="bg-gradient-to-r from-purple-600 to-pink-600 px-3 py-1 rounded text-white text-sm font-semibold shadow-md">Arena</div>
-                <div className="text-white/70 text-sm">Choose moves, confirm and watch the clash</div>
-              </div>
+            {canConfirm && !processingMoves && <div className="mt-5 flex items-center justify-between">
 
-              <div className="flex items-center gap-3">
                 {(
                   <button onClick={handleConfirm} className="px-5 py-2 bg-gradient-to-r from-emerald-500 to-lime-400 text-black font-semibold rounded-lg shadow hover:scale-105 transition transform">
                     Confirm Moves
                   </button>
                 )}
                 <div className="text-xs text-white/60">Selected: <span className="text-white font-semibold ml-1">{selectedMoves.length}</span></div>
-              </div>
-            </div>
+              </div>}
           </div>
         </div>
 
@@ -1035,8 +1336,8 @@ export default function BattlePage() {
       </main>
 
       {/* Deck Modals (unchanged usage) */}
-      <DeckModal open={player2DeckOpen} swapMethod={swapMethod} onOpenChange={setPlayer2DeckOpen} title="Player 2 Deck" deck={player2Benched} showSwap />
-      <DeckModal open={player1DeckOpen} swapMethod={swapMethod} onOpenChange={setPlayer1DeckOpen} title="Player 1 Deck" deck={player1Benched} showSwap />
+      <DeckModal open={player2DeckOpen && (mapPlayer == "Player 2" ? true : false)} swapMethod={swapMethod} onOpenChange={setPlayer2DeckOpen} title="Player 2" deck={player2Benched} showSwap />
+      <DeckModal open={player1DeckOpen && (mapPlayer == "Player 1" ? true : false)} swapMethod={swapMethod} onOpenChange={setPlayer1DeckOpen} title="Player 1" deck={player1Benched} showSwap />
 
       <SwapSelectorModal
         swapSelectorOpen={swapSelectorOpen}
@@ -1049,7 +1350,7 @@ export default function BattlePage() {
         confirmSwap={confirmSwap}
         cancelSwap={cancelSwap}
       />
-      
+
       <TargetSelectionModal
         battlefieldCards={battlefieldCards}
         targetModal={targetModal}

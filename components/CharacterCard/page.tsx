@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { AiOutlineCheckCircle, AiFillCheckCircle, AiOutlineInfoCircle } from "react-icons/ai";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import MoveSelectionModal from "@/app/modals/MoveSelectionModal";
+import MoveSelectionModal from "@/components/modals/MoveSelectionModal";
 
 type Move = { name: string; type: string; power?: number; description?: string };
 type Ability = { name: string; description: string };

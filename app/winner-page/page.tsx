@@ -61,7 +61,7 @@ const WinnerPage = ({ winnerName = "You" }) => {
         transition={{ duration: 0.8 }}
         className="text-5xl font-bold tracking-widest text-center drop-shadow-[0_0_15px_rgba(255,255,255,0.7)]"
       >
-        🎉 Congratulations 🎉
+        🎉 Battle Over 🎉
       </motion.h1>
 
       <motion.h2

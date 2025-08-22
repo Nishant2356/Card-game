@@ -1,5 +1,5 @@
-import { Character, Move } from "../types";
-import { TargetDetails } from "../types";
+import { Character, Move } from "../../app/types";
+import { TargetDetails } from "../../app/types";
 
 interface TargetSelectionModalProps {
     battlefieldCards: any[];

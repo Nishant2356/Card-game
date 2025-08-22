@@ -1,26 +1,53 @@
 "use client";
 import { Button } from "@/components/ui/button";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import CharacterSelectionModal from "../modals/CharacterSelectionModal";
+import CharacterSelectionModal from "../../components/modals/CharacterSelectionModal";
+import { useSocket } from "@/hooks/useSocket";
+import { useSocketContext } from "@/context/SocketContext";
 
 export default function BattlePreparation() {
   const [openModal, setOpenModal] = useState(false);
   const [currentPlayer, setCurrentPlayer] = useState("");
   const [teams, setTeams] = useState<any[]>([]);
   const router = useRouter();
+  const { playerMap, setPlayerMap, socket } = useSocketContext();
+  const mapPlayer = playerMap[socket?.id as string];
+
+  // useEffect(() => {
+  //   console.log(teams)
+  //   socket?.emit("teamSelected", teams);
+  // }, [teams])
+
+  socket?.on('teamSelected', (data) => {
+    console.log(playerMap[socket?.id as string])
+    setTeams(data);
+  });
+
+  socket?.on('goToBattle', (data) => {
+    localStorage.setItem("battleTeams", JSON.stringify(teams));
+    console.log(teams)
+    router.push("/battle-page");
+  });
 
   const handleOpenModal = (player: string) => {
+    console.log(mapPlayer)
+    if(player!==mapPlayer) {
+      return;
+    }
     setCurrentPlayer(player);
     setOpenModal(true);
   };
 
-  // Save selected characters (with moves) for a player
   const handleConfirmSelection = (player: string, characters: any[]) => {
-    setTeams((prev) => {
-      const filtered = prev.filter((t) => t.player !== player);
-      return [...filtered, { player, characters }];
-    });
+    const updatedTeams = [
+      ...teams.filter(t => t.player !== player),
+      { player, characters }
+    ];
+    
+    setTeams(updatedTeams);
+    console.log(updatedTeams)
+    socket?.emit("teamSelected", updatedTeams); // Emit immediately with known value
     setOpenModal(false);
   };
 
@@ -28,6 +55,7 @@ export default function BattlePreparation() {
     localStorage.setItem("battleTeams", JSON.stringify(teams));
     console.log(teams)
     router.push("/battle-page");
+    socket?.emit("goToBattle", null);
   };
 
   const p1 = teams.find((t) => t.player === "Player 1");

@@ -2,11 +2,14 @@
   "name": "card-game",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "start-socket": "ts-node app/api/socket/server.ts",
+    "dev-socket": "nodemon app/api/socket/server.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.13.0",
@@ -17,6 +20,7 @@
     "@radix-ui/react-tooltip": "^1.2.7",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "express": "^5.1.0",
     "framer-motion": "^12.23.12",
     "lucide-react": "^0.536.0",
     "next": "15.4.5",
@@ -26,21 +30,27 @@
     "react-hot-toast": "^2.5.2",
     "react-icons": "^5.5.0",
     "react-use": "^17.6.0",
+    "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.1",
     "tailwind-merge": "^3.3.1",
     "uuid": "^11.1.0"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
     "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
+    "@types/express": "^5.0.3",
+    "@types/node": "^20.19.10",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/socket.io-client": "^3.0.0",
     "eslint": "^9",
     "eslint-config-next": "15.4.5",
+    "nodemon": "^3.1.10",
     "prisma": "^6.13.0",
     "tailwindcss": "^4",
+    "ts-node": "^10.9.2",
     "tsx": "^4.20.3",
     "tw-animate-css": "^1.3.6",
-    "typescript": "^5"
+    "typescript": "^5.9.2"
   }
 }
