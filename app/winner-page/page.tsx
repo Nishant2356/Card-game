@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import dynamic from "next/dynamic";
 import { Button } from "@/components/ui/button"; // Replace with your own button if not using shadcn
 import { Trophy } from "lucide-react";
+import { useSearchParams } from "next/navigation";
 
 // Load react-confetti only on the client
 const Confetti = dynamic(() => import("react-confetti"), { ssr: false });
@@ -12,6 +13,9 @@ const Confetti = dynamic(() => import("react-confetti"), { ssr: false });
 const WinnerPage = ({ winnerName = "You" }) => {
   const [windowSize, setWindowSize] = useState({ width: 0, height: 0 });
   const [isMounted, setIsMounted] = useState(false);
+
+  const searchParams = useSearchParams();
+  const winner = searchParams.get("winner");
 
   // Only set window size after component mounts (avoids SSR mismatch)
   useEffect(() => {
@@ -70,7 +74,7 @@ const WinnerPage = ({ winnerName = "You" }) => {
         transition={{ delay: 0.5 }}
         className="text-3xl mt-3 font-light italic text-yellow-300 drop-shadow-[0_0_10px_rgba(255,215,0,0.7)]"
       >
-        {winnerName} is the Champion!
+        {winner} is the Champion!
       </motion.h2>
 
       {/* Play Again Button */}

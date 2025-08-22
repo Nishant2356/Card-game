@@ -1,49 +1,48 @@
 // context/SocketContext.tsx
-'use client';
+"use client";
 
-import { createContext, useContext, useState, useEffect } from 'react';
-import { Socket, io } from 'socket.io-client';
-import { DefaultEventsMap } from 'socket.io';
-import { useSocket } from '@/hooks/useSocket';
+import { useSocket } from "@/hooks/useSocket";
+import React, { createContext, useContext, useEffect, useState } from "react";
+import { DefaultEventsMap } from "socket.io";
+import { io, Socket } from "socket.io-client";
 
-type PlayerType = "player1" | "player2";
-type PlayerMap = Record<string, PlayerType>;
+type SocketContextType = {
+    socket: Socket | null;
+    myRoomId: string | null;
+    myName: string | null;
+    setMyRoomId: (id: string) => void;
+    setMyName: (name: string) => void;
+    playerMap: PlayerMap;
+    setPlayerMap: (map: PlayerMap) => void;
+};
 
-interface SocketContextType {
-  playerMap: PlayerMap;
-  setPlayerMap: (map: PlayerMap) => void;
-  socket: Socket<DefaultEventsMap, DefaultEventsMap> | null;
-  isConnected: boolean;
-}
+type PlayerType = "Player 1" | "Player 2";
+type PlayerMap = {
+    [socketId: string]: PlayerType; // No undefined here
+};
 
 const SocketContext = createContext<SocketContextType | undefined>(undefined);
 
-export function SocketProvider({ children }: { children: React.ReactNode }) {
-  const [playerMap, setPlayerMap] = useState<PlayerMap>({});
-  const [isConnected, setIsConnected] = useState(false);
-    // Initialize socket connection
-  const socket = useSocket();
+export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
+    const socket = useSocket();
+    const [myRoomId, setMyRoomId] = useState<string | null>(null);
+    const [myName, setMyName] = useState<string | null>(null);
+    const [playerMap, setPlayerMap] = useState<PlayerMap>({});
 
-  socket?.on('assignPlayer', (data) => {
-    setPlayerMap(data);
-  });
+    useEffect(() => {
+        console.log(myName, myRoomId, socket?.id)
+    }, [myName, myRoomId])
 
-  return (
-    <SocketContext.Provider value={{ 
-      playerMap, 
-      setPlayerMap, 
-      socket,
-      isConnected
-    }}>
-      {children}
-    </SocketContext.Provider>
-  );
-}
+    return (
+        <SocketContext.Provider value={{ socket, myRoomId, myName, setMyRoomId, setMyName, playerMap, setPlayerMap }}>{children}</SocketContext.Provider>
+    );
+};
 
-export function useSocketContext() {
-  const context = useContext(SocketContext);
-  if (!context) {
-    throw new Error('useSocketContext must be used within a SocketProvider');
-  }
-  return context;
-}
+export const useSocketContext = () => {
+    const context = useContext(SocketContext);
+    if (!context) {
+        throw new Error("useSocketContext must be used within a SocketProvider");
+    }
+    return context;
+};
+

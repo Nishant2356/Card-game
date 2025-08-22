@@ -29,6 +29,8 @@ export type Move = {
     maxHP: number;
     currentStats: any;
   }
+
+  export type PlayerType = "Player 1" | "Player 2";
   
   export type Ability = { name: string; description: string };
   export type Character = {
@@ -65,3 +67,19 @@ export type StatEffect = {
     duration: number;
     targets: TargetDetails[];
   };
+
+  
+export type GameState = {
+  player1Deck: Deck[];
+  player2Deck: Deck[];
+  faintedPlayer1: { [key: string]: boolean };
+  faintedPlayer2: { [key: string]: boolean };
+  activePlayer1Count: number;
+  activePlayer2Count: number;
+  turn: "Player 1" | "Player 2";
+  selectedMoves: SelectedMove[];
+  glowingCards: { moveMaker: string | null; targets: string[] };
+  round: number;
+  teamsLoaded: boolean;
+  processingMoves: boolean;
+};
